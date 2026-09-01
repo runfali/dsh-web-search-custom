@@ -12,10 +12,14 @@
   "files": [
     "src",
     "lib",
+    "tests",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
+  "scripts": {
+    "test": "node --test tests/*.mjs"
+  },
   "license": "MIT",
   "keywords": [
     "dsh",
