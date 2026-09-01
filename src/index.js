@@ -9,7 +9,8 @@
  * 无任何第三方依赖；不改 dsh 源码。
  */
 import z from '@deepseek-ai/schemastery'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+// dsh 0.1.2-alpha.3：installSettingsSection/settingsNamespace 已从 dsh-settings 移除，
+// 设置接线改用 provider 方法 settings.installSection(owner, ns, schema, entry, hooks)。
 
 /** Cordis 插件短名（路由/日志用）。 */
 export const name = 'web-search-custom'
@@ -17,8 +18,10 @@ export const name = 'web-search-custom'
 /** 本 provider 在 ctx.web 搜索注册表中的稳定 id。 */
 export const SEARCH_PROVIDER_ID = 'custom'
 
-/** Settings 命名空间（浏览器卡片与 host 共用同一字符串）。 */
-export const WEB_SEARCH_CUSTOM_SETTINGS_NAMESPACE = settingsNamespace('web-search-custom')
+/** Settings 命名空间（浏览器卡片与 host 共用同一字符串）。
+ * dsh 0.1.2-alpha 起 settingsNamespace() brand 辅助已移除；
+ * 命名空间在 settings.register/installSection 处校验（小写连字符标识符）。 */
+export const WEB_SEARCH_CUSTOM_SETTINGS_NAMESPACE = 'web-search-custom'
 
 export const DEFAULT_TIMEOUT_MS = 30000
 
@@ -216,13 +219,20 @@ function withTimeout(signal, timeoutMs) {
  */
 export function apply(ctx, config = {}) {
   let current = () => config
-  installSettingsSection(ctx, WEB_SEARCH_CUSTOM_SETTINGS_NAMESPACE, Config, config, {
-    setSource: (source) => {
-      current = source
-    },
-    onChange: () => {
-      // provider 每次搜索时读取 current()，无需主动刷新
-    }
+  // dsh 0.1.2-alpha.3：独立 installSettingsSection 帮助函数已从 dsh-settings 移除，
+  // 同样的接线改为 provider 上的 settings.installSection(owner, ns, schema, entry, hooks)
+  // （宿主源码级核对：register(base=entry) → setSource(scope.get) → 卸载回落 effect →
+  // onChange() 同步首发 → scope.watch 持续通知）。settings 晚于本插件 apply 时到达，
+  // current() 闭包天然兼容晚接线。
+  ctx.inject(['settings'], (sctx) => {
+    sctx.settings.installSection(ctx, WEB_SEARCH_CUSTOM_SETTINGS_NAMESPACE, Config, config, {
+      setSource: (source) => {
+        current = source
+      },
+      onChange: () => {
+        // provider 每次搜索时读取 current()，无需主动刷新
+      }
+    })
   })
 
   ctx.web.registerSearchProvider({
