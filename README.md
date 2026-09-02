@@ -16,8 +16,9 @@ http://127.0.0.1:8080/search?format=json&q={query}
 
 ## 环境要求
 
-- DeepSeek Harness（dsh），以 `web` profile 运行；
-- Node.js >= 22；
+- DeepSeek Harness（dsh）**≥ 0.1.2-alpha.3**，以 `web` profile 运行（已在 0.1.2-alpha.4 实测）；
+- Node.js `^22.19.0 || >=24.0.0`；
+- 运行时依赖：**无**——`@deepseek-ai/dsh-settings`、`@deepseek-ai/schemastery`、`react` 三个 peer 全部由 dsh 宿主自身提供；插件仅访问你在设置页配置的搜索端点，无文件写、无子进程；
 - 一个可用的 JSON 搜索接口（如自建 SearXNG 或其他兼容服务）。
 
 ## 安装
