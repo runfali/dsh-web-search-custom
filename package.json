@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-search-custom",
-  "version": "0.1.2-alpha.4",
+  "version": "0.1.2-rc.1",
   "description": "Generic URL + optional API key search provider for the DeepSeek Harness web profile (ctx.web), with an in-settings configuration card. Zero-intrusion bundle plugin; works with any SearXNG-compatible JSON endpoint.",
   "type": "module",
   "main": "src/index.js",
