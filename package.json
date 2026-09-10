@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-search-custom",
-  "version": "0.1.2-rc.1",
+  "version": "0.1.5-rc.1",
   "description": "Generic URL + optional API key search provider for the DeepSeek Harness web profile (ctx.web), with an in-settings configuration card. Zero-intrusion bundle plugin; works with any SearXNG-compatible JSON endpoint.",
   "type": "module",
   "main": "src/index.js",
@@ -15,10 +15,12 @@
     "tests",
     "cordis.patch.yml",
     "README.md",
+    "README.zh-CN.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test tests/*.mjs"
+    "test": "node --test tests/*.test.mjs && node tests/client-smoke.mjs",
+    "test:host": "node --test tests/host-integration.test.mjs"
   },
   "license": "MIT",
   "keywords": [
@@ -33,13 +35,13 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-settings": ">=0.1.2-alpha.3 <0.2.0",
+    "@deepseek-ai/dsh-settings": ">=0.1.2-alpha.3 <0.2.0 || >=0.1.5-alpha.1 <0.1.6",
     "@deepseek-ai/schemastery": "^3.18.2",
     "react": "^18.0.0"
   },
   "dsh": {
     "engines": {
-      "dsh": ">=0.1.2-alpha.3 <0.2.0"
+      "dsh": ">=0.1.2-alpha.3 <0.2.0 || >=0.1.5-alpha.1 <0.1.6"
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -47,5 +49,9 @@
     "client": {
       "platform": "web"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/runfali/dsh-web-search-custom.git"
   }
 }
