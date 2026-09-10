@@ -154,8 +154,9 @@ function getPath(object, path) {
   return current
 }
 
-/** 取 item 上第一个非空字段。 */
+/** 取 item 上第一个非空字符串字段（非对象条目一律视为无字段）。 */
 function firstString(item, keys) {
+  if (item === null || item === undefined || typeof item !== 'object') return ''
   for (const key of keys) {
     const value = item[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
@@ -163,7 +164,7 @@ function firstString(item, keys) {
   return ''
 }
 
-/** 把任意 JSON 结果数组映射为 web 缝的 WebSearchSource[]（按 url 去重）。 */
+/** 把任意 JSON 结果数组映射为 web 缝的 WebSearchSource[]（按 url 去重；非对象条目直接跳过）。 */
 function mapResults(payload, options) {
   const list = getPath(payload, options.resultsPath)
   const seen = new Set()
