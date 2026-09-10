@@ -1,63 +1,160 @@
 # dsh-web-search-custom
 
-让 DeepSeek Harness 的 Web UI（`dsh --profile web`）使用**任意的 JSON 搜索 API**——只要提供一个 URL 和（可选的）API key，就能替换默认的 DeepSeek 搜索。默认配置直接可用自建 SearXNG：
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-green.svg)](package.json)
+[![Platform](https://img.shields.io/badge/platform/DeepSeek%20Harness-orange)](https://deepseek.com)
+
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+Point the [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness)
+`web` profile at **any JSON search API** — give it a URL and (optionally) an API
+key, and it replaces the built-in DeepSeek search. The shipped default already
+works against a self-hosted SearXNG:
 
 ```text
 http://127.0.0.1:8080/search?format=json&q={query}
 ```
 
-## 特性
+> [!IMPORTANT]
+> **Design intent.** The plugin is a thin adapter, nothing more: it owns one
+> search provider behind the `ctx.web` capability seam and one settings card.
+> It ships no search engine, no index, no cache, and no bundled credentials; it
+> talks only to the endpoint you configure. Uninstall it and the stock provider
+> is back with zero residue.
 
-- 标准 Cordis bundle 插件，零侵入、不修改 dsh 源码；卸载后即恢复官方 DeepSeek 搜索；
-- 除 dsh 平台自带包（`@deepseek-ai/dsh-settings`、`@deepseek-ai/schemastery`）外无第三方依赖；
-- 浏览器端自带配置卡片（**设置 → 插件配置**），URL / API key / 超时 / 字段映射全都可以直接在页面上填写；
-- 支持 GET / POST、`Authorization` 鉴权、额外请求头以及结果字段映射；
-- 兼容任何返回 SearXNG 风格 JSON（`results[]`）的接口。
+---
 
-## 环境要求
+## Table of Contents
 
-- DeepSeek Harness（dsh）**≥ 0.1.2-alpha.3**，以 `web` profile 运行（已在 0.1.2-alpha.4 实测）；
-- Node.js `^22.19.0 || >=24.0.0`；
-- 运行时依赖：**无**——`@deepseek-ai/dsh-settings`、`@deepseek-ai/schemastery`、`react` 三个 peer 全部由 dsh 宿主自身提供；插件仅访问你在设置页配置的搜索端点，无文件写、无子进程；
-- 一个可用的 JSON 搜索接口（如自建 SearXNG 或其他兼容服务）。
+- [Why](#why)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Configure in the settings page](#configure-in-the-settings-page)
+- [Configuration reference](#configuration-reference)
+- [Other configuration channels](#other-configuration-channels)
+- [Uninstall](#uninstall)
+- [Limits](#limits)
+- [Development](#development)
+- [License](#license)
 
-## 安装
+## Why
+
+dsh's web profile resolves search through the `ctx.web` seam. Out of the box
+that seam is served by a hosted search backend, which is the wrong trade for
+anyone who already runs their own search stack (SearXNG, an internal search
+gateway, a vendor API) or who wants queries to stay inside their own network.
+
+This plugin registers one additional provider into that seam and lets you select
+it. Everything else — the `web_search` tool, result capping, cancellation, error
+propagation — keeps working unchanged, because it is the same seam the stock
+provider uses.
+
+## Features
+
+- **Standard dsh bundle plugin.** Zero intrusion: no dsh source is modified;
+  removing the plugin restores the stock search provider.
+- **Zero runtime dependencies.** Only dsh-shipped packages are used
+  (`@deepseek-ai/dsh-settings`, `@deepseek-ai/schemastery`, plus React on the browser
+  side). Nothing is vendored or bundled.
+- **In-settings configuration card** (Settings → Plugins): URL, API key,
+  timeout and the whole field mapping are editable in the page, with the same
+  overridden/reset affordances as first-party plugin cards.
+- **Works with any JSON API**: GET or POST, `Authorization` bearer (or any header
+  name/scheme), extra headers, and dotted-path field mapping.
+- **SearXNG-compatible by default**: the shipped mapping matches SearXNG's
+  `results[]` / `url` / `title` / `content` / `publishedDate` shape.
+
+## How it works
+
+```text
+web_search tool
+      │
+      ▼
+ctx.web (capability seam)  ──selection──▶  provider id "custom"
+      │                                          │
+      │                                          ▼
+      │                              fetch(your endpoint)  ──▶  your JSON API
+      │                                          │
+      └◀──── WebSearchResult { sources[], truncated } ◀──┘
+```
+
+The host side registers the namespace `web-search-custom` (so the settings page
+can render a card for it) and registers a search provider with the stable id
+`custom`. The provider's `search(query, signal)` reads the live settings value on
+**every call**, fills the `{query}` / `{apiKey}` placeholders, performs the HTTP
+request with the caller's cancellation signal plus its own timeout, and maps the
+JSON payload into `sources[]` (deduplicated by URL, non-`http(s)` entries dropped,
+HTML stripped, entities decoded).
+
+Provider selection follows the seam's own rules, resolved at call time:
+a configured id wins; with no id configured, exactly one usable provider is
+required. The plugin's own `cordis.patch.yml` therefore also sets
+`web.searchProvider: custom` so the choice is explicit rather than accidental.
+
+## Requirements
+
+| Item | Value |
+|---|---|
+| DeepSeek Harness | `>=0.1.2-alpha.3 <0.2.0 || >=0.1.5-alpha.1 <0.1.6` (verified on 0.1.2-alpha.4 and 0.1.5-rc.1) |
+| Node.js | `^22.19.0 || >=24.0.0` |
+| Runtime dependencies | **none** — the three peers come from the dsh host install |
+| Network | outbound access from the dsh host to the endpoint you configure |
+
+The `dsh` range is declared under `dsh.engines.dsh` (and mirrored in
+`peerDependencies` for the dsh packages the plugin relies on). The disjunction is
+load-bearing rather than cosmetic: npm semver only satisfies a prerelease from a
+range group that itself contains a prerelease with the same
+`[major, minor, patch]` tuple, so a plain `<0.2.0` group does **not** cover
+`0.1.5-rc.1`. `tests/entry.test.mjs` pins this with a decision table and a
+counter-proof against the old single range.
+
+## Install
 
 ```bash
 dsh plugin --profile web add dsh-web-search-custom
 ```
 
-安装完成后重启 dsh Web 生效。
+Restart the dsh web instance afterwards. From a local checkout, pass the
+directory path instead of the package name.
 
-## 在设置页配置（推荐）
+## Configure in the settings page
 
-打开 Web UI 的 **设置 → 插件配置**，会看到「自定义搜索（web-search-custom）」卡片，展开后可直接填写：
+Open **Settings → Plugins** in the web UI and expand the
+"Custom search (web-search-custom)" card. Everything is editable there:
 
-- 搜索 URL（支持 `{query}` / `{apiKey}` 占位符）
-- API Key（**可留空**；非空时默认以 `Authorization: Bearer` 发送）
-- 请求方法、POST body 模板、额外请求头（JSON）、超时
-- 结果字段映射（`resultsPath` / `urlField` / `titleField` / `snippetField` / `publishedField`）
+- the search URL (with `{query}` / `{apiKey}` placeholders),
+- the API key (**optional**; when set it is sent as `Authorization: Bearer`),
+- request method, POST body template, extra headers (JSON), timeout,
+- the result field mapping (`resultsPath` / `urlField` / `titleField` /
+  `snippetField` / `publishedField`).
 
-保存后写回 `~/.dsh/settings.yaml` 的 `web-search-custom:` 段并热生效；「已覆盖 / 重置」状态与官方插件卡片一致。
+Saving writes the `web-search-custom:` section of your dsh settings document and
+takes effect immediately — the next search uses the new value, no restart. The
+overridden/reset badges behave exactly like first-party plugin cards.
 
-## 配置项一览
+## Configuration reference
 
-| 字段 | 默认值 | 说明 |
+| Field | Default | Description |
 | --- | --- | --- |
-| `url` | 本机 SearXNG | 搜索地址。支持 `{query}`、`{apiKey}` 占位符（自动 URL 编码）；GET 且不含 `{query}` 时自动补 `q=` 参数 |
-| `apiKey` | 空 | 可选。非空时默认以 `Authorization: Bearer <key>` 发送；若 `url` 或 POST `body` 里已有 `{apiKey}` 则不再额外加头 |
-| `method` | `GET` | `GET` 或 `POST` |
-| `body` | `{"query":"{query}"}` | POST body 模板，支持 `{query}` / `{apiKey}` |
-| `headers` | `{}` | 额外请求头，JSON 字符串 |
-| `authHeader` | `Authorization` | apiKey 使用的请求头名 |
-| `authScheme` | `Bearer` | 鉴权 scheme；填空字符串则裸发 key 值 |
-| `timeoutMs` | `30000` | 单次请求超时 |
-| `resultsPath` | `results` | JSON 中结果数组的点路径，如 `data.results` |
-| `urlField` / `titleField` / `snippetField` / `publishedField` | `url` / `title` / `content` / `publishedDate` | 结果字段名映射（SearXNG 默认即 `content`、`publishedDate`） |
+| `url` | local SearXNG | Search endpoint. Supports `{query}` and `{apiKey}` placeholders (URL-encoded automatically). For GET without a `{query}` placeholder, `q=` is appended automatically |
+| `apiKey` | empty | Optional. When set, sent as `Authorization: Bearer <key>` by default; if the URL or the POST body already contains `{apiKey}`, no extra header is added |
+| `method` | `GET` | `GET` or `POST`; any other value degrades to `GET` |
+| `body` | `{"query":"{query}"}` | POST body template, supports `{query}` / `{apiKey}` |
+| `headers` | `{}` | Extra request headers as a JSON string |
+| `authHeader` | `Authorization` | Header name used for the API key |
+| `authScheme` | `Bearer` | Auth scheme; leave empty to send the bare key |
+| `timeoutMs` | `30000` | Per-request timeout |
+| `resultsPath` | `results` | Dotted path to the result array, e.g. `data.results` |
+| `urlField` / `titleField` / `snippetField` / `publishedField` | `url` / `title` / `content` / `publishedDate` | Result field-name mapping (SearXNG's defaults) |
 
-## 其他配置方式
+Each field also falls back to a wider list of common aliases at mapping time
+(for example a missing `titleField` value still tries `title` then `name`).
 
-### profile 用户补丁层（`~/.dsh/profiles/web/cordis.patch.yml`）
+## Other configuration channels
+
+### Profile patch layer (settings document alternative)
 
 ```yaml
 - id: web-search-custom
@@ -77,30 +174,58 @@ dsh plugin --profile web add dsh-web-search-custom
     publishedField: publishedDate
 ```
 
-> 注意：补丁是整段替换 `config`，覆盖时要写全所有项。
+> Note: a patch replaces the whole `config` block — write every key when overriding.
 
-### 环境变量（不改文件，优先级高于设置页配置）
+### Environment variables
 
-| 变量 | 说明 |
+Environment overrides win over the settings page and require no file edit:
+
+| Variable | Description |
 | --- | --- |
-| `WEB_SEARCH_CUSTOM_URL` | 覆盖搜索 URL |
-| `WEB_SEARCH_CUSTOM_API_KEY` | 覆盖 API key（推荐用于含 secret 的场景） |
-| `WEB_SEARCH_CUSTOM_HEADERS` | 额外请求头，JSON 字符串 |
-| `WEB_SEARCH_CUSTOM_TIMEOUT_MS` | 超时毫秒数 |
+| `WEB_SEARCH_CUSTOM_URL` | Override the search URL |
+| `WEB_SEARCH_CUSTOM_API_KEY` | Override the API key (recommended for secrets) |
+| `WEB_SEARCH_CUSTOM_HEADERS` | Extra headers, JSON string |
+| `WEB_SEARCH_CUSTOM_TIMEOUT_MS` | Timeout in milliseconds |
 
-## 卸载
+## Uninstall
 
 ```bash
 dsh plugin --profile web remove dsh-web-search-custom
 ```
 
-重启 dsh 后恢复自带的 DeepSeek 搜索。
+Restart dsh and the stock search provider takes over again.
 
-## 限制
+## Limits
 
-- `apiKey` 作为普通设置字段保存（`~/.dsh/settings.yaml`），不经过凭据系统；敏感环境建议用环境变量 `WEB_SEARCH_CUSTOM_API_KEY` 覆盖。
-- 结果页大小由 SearXNG 服务端决定，客户端无法指定 `count`；工具层仍会按 `maxResults` 截断。
+- The API key is stored as an ordinary settings field, not in a credential
+  store. For sensitive deployments prefer `WEB_SEARCH_CUSTOM_API_KEY`.
+- The page size is decided by the upstream service; the client cannot request a
+  specific `count`. The tool layer still truncates to `maxResults`.
+- Result mapping is field-based, not query-language aware: exotic payload shapes
+  need the field mapping (and, if necessary, a `resultsPath`) adjusted.
 
-## 许可证
+## Development
+
+```bash
+npm install          # dev dependencies (dsh packages, for the host-contract test)
+npm test             # node --test tests/*.test.mjs && node tests/client-smoke.mjs
+npm run test:host    # real Cordis + WebRuntime + file settings provider
+```
+
+| Test | What it proves |
+|---|---|
+| `tests/entry.test.mjs` | Real entry load (`import('../src/index.js')`), manifest declarations, the engines decision table (hand-rolled comparator + counter-proof + cross-check against the host's real `semver.satisfies`), four-way key parity (host schema ↔ client fields ↔ client views ↔ patch config), settings hot-reload alive reference, dependency hygiene |
+| `tests/host-integration.test.mjs` | Driven by the real `@deepseek-ai/cordis` context, the real `ctx.web` runtime and the real file-backed settings provider: provider registration, full `web.search()` path, `maxResults` capping by the seam, live settings → next-call effect, and the seam's selection semantics |
+| `tests/client-smoke.mjs` | Browser half: bundle id, short service names, locale parity, slot registration contract, card rendering, save/reset write path, read-only disabling |
+| `tests/live-search.mjs` | Opt-in live check against a real endpoint: `DSH_WSC_LIVE_URL='http://host/search?format=json&q={query}' node tests/live-search.mjs` |
+
+```text
+src/index.js          host half — settings namespace, URL/body templating, mapping
+lib/client.js         browser half — settings card (hand-written bundle, no build step)
+cordis.patch.yml      bundle patch: select provider "custom" and mount the plugin
+tests/                entry + host-contract + client-smoke + opt-in live check
+```
+
+## License
 
 [MIT](LICENSE)
