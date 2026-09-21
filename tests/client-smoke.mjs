@@ -6,7 +6,7 @@
  *   2. locale 词典注册（zh/en 键集合一致，覆盖全部 label/hint/UI 文案）
  *   3. settingsScope 绑定 namespace = web-search-custom
  *   4. settings.plugin.item 槽位注册（key/locale/inject 载荷 hooks + actions）
- *   5. 卡片渲染：展开态含全部 13 个字段行与保存/放弃按钮
+ *   5. 卡片渲染：展开态含全部 15 个字段行与保存/放弃按钮
  *   6. 表单保存链路：改字段 → 保存落 user 层；重置 → unset
  *   7. 只读态：全部输入禁用（客户端交互层盲区守护）
  *
@@ -76,7 +76,9 @@ const localeDicts = {}
 let boundNamespace = null
 const scopeListeners = new Set()
 const DEFAULT_VALUE = {
-  url: 'http://127.0.0.1:8080/search?format=json&q={query}',
+  api: 'auto',
+  url: 'https://api.anysearch.com/v1/search',
+  maxResults: 10,
   apiKey: '', method: 'GET', body: '{"query":"{query}"}', headers: '{}',
   authHeader: 'Authorization', authScheme: 'Bearer', timeoutMs: 30000,
   resultsPath: 'results', urlField: 'url', titleField: 'title', snippetField: 'content', publishedField: 'publishedDate',
@@ -177,23 +179,41 @@ console.log('== 卡片渲染 ==')
 const cards = render()
 assert.equal(cards.length, 1, '应渲染一张 li 卡片')
 const texts = collectText(cards[0]).join(' ')
-for (const needle of ['自定义搜索（web-search-custom）', '搜索 URL', 'API Key（可留空）', '请求方法', 'POST body 模板', '额外请求头（JSON）', '鉴权请求头名', '鉴权 scheme', '超时（毫秒）', '结果数组路径', 'URL 字段', '标题字段', '摘要字段', '发布日期字段', '保存', '放弃']) {
+for (const needle of ['自定义搜索（web-search-custom）', '接口档位（api）', '搜索 URL', 'API Key（留空 = 免 key 匿名档）', '结果条数上限', '请求方法（仅 generic）', 'POST body 模板', '额外请求头（JSON）', '鉴权请求头名（仅 generic）', '鉴权 scheme（仅 generic）', '超时（毫秒）', '结果数组路径（仅 generic）', 'URL 字段', '标题字段', '摘要字段', '发布日期字段', '保存', '放弃']) {
   assert.ok(texts.includes(needle), '渲染文案应含: ' + needle)
 }
-ok('卡片渲染包含全部 13 个字段与保存/放弃按钮')
+ok('卡片渲染包含全部 15 个字段与保存/放弃按钮')
 
 console.log('== 表单保存链路 ==')
 const state = snap()
 assert.equal(state.dirty, false, '初始不脏')
 assert.equal(state.writable, true, '可写')
 assert.equal(state.available, true, '可用')
-assert.equal(Object.keys(state).filter((k) => typeof state[k] === 'object' && state[k] !== null).length, 13, '13 个字段快照')
+assert.equal(Object.keys(state).filter((k) => typeof state[k] === 'object' && state[k] !== null).length, 15, '15 个字段快照')
 payload.edit('url', 'http://127.0.0.1:9999/search?format=json&q={query}')
 assert.equal(snap().dirty, true, '编辑后脏')
 await payload.save()
 assert.equal(scopeState.user.url, 'http://127.0.0.1:9999/search?format=json&q={query}', '保存落到 user 层')
 assert.equal(snap().dirty, false, '保存后不脏')
 ok('编辑 → 保存 → user 层落值')
+
+payload.edit('api', 'anysearch')
+payload.edit('apiKey', 'sk-live-1')
+await payload.save()
+assert.equal(scopeState.user.api, 'anysearch', 'api 档位落到 user 层')
+assert.equal(scopeState.user.apiKey, 'sk-live-1', 'apiKey 落到 user 层')
+ok('api / apiKey（带 key 走鉴权档）落值')
+
+payload.edit('apiKey', '')
+await payload.save()
+ok('apiKey 清空 = 免 key 匿名档（客户端原样落盘，语义由 host 判定）')
+payload.edit('apiKey', 'sk-live-1')
+await payload.save()
+
+payload.edit('maxResults', '5')
+await payload.save()
+assert.equal(scopeState.user.maxResults, 5, 'maxResults 以 number 落盘')
+ok('maxResults 数字类型正确 (number)')
 
 payload.edit('timeoutMs', '45000')
 await payload.save()
@@ -229,7 +249,7 @@ const findInputs = (node) => {
   for (const child of node.children || []) findInputs(child)
 }
 findInputs(readOnlyCards[0])
-assert.ok(inputs.length >= 13, '应渲染 >=13 个输入框，实际 ' + inputs.length)
+assert.ok(inputs.length >= 15, '应渲染 >=15 个输入框，实际 ' + inputs.length)
 assert.ok(inputs.every((input) => input.props.disabled === true), '只读态下全部输入必须禁用')
 ok('只读态：' + inputs.length + ' 个输入框全部 disabled')
 
@@ -263,7 +283,7 @@ assert.equal(writableActions.length, 2)
 assert.ok(writableActions.every((b) => b.props.disabled === false), '可写 + dirty 时保存/放弃必须可用')
 const writableResets = collectButtons(writableCards[0]).filter((b) => /_reset$/.test(String(b.props.className)))
 assert.ok(writableResets.every((b) => b.props.disabled === false), '可写态下重置按钮必须可用')
-ok('可写态 + dirty：保存/放弃与 13 个重置按钮均可用（非恒禁用）')
+ok('可写态 + dirty：保存/放弃与全部行级重置按钮均可用（非恒禁用）')
 await payload.discard()
 
 console.log('\nclient-smoke: ' + PASS.length + ' 项全部通过')

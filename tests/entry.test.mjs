@@ -87,7 +87,7 @@ test('entry: settings.setSource 热更新活引用（闭包传参快照陷阱）
 // ---------------------------------------------------------------------------
 
 test('manifest: version / exports / bundle / client 平台声明', () => {
-  assert.equal(pkg.version, '0.1.5-rc.1')
+  assert.equal(pkg.version, '0.2.0')
   assert.equal(pkg.main, 'src/index.js')
   assert.equal(pkg.exports['.'], './src/index.js')
   assert.equal(pkg.exports['./client'], './lib/client.js')

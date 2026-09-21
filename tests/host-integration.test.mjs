@@ -97,7 +97,7 @@ test('host-contract: 真实 Cordis + WebRuntime + 文件型 settings 下 apply �
   if (missing.length > 0) return t.skip('host deps unavailable: ' + missing.join(', '))
   const host = await makeHost()
   try {
-    apply(host.ctx, { url: 'http://127.0.0.1:18080/search?format=json' })
+    apply(host.ctx, { api: 'generic', url: 'http://127.0.0.1:18080/search?format=json' })
     await host.settle()
     // 真注册表里有我们的 provider
     assert.deepEqual([...host.web.searchProviders.keys()], [SEARCH_PROVIDER_ID])
@@ -125,7 +125,7 @@ test('host-contract: 真实文档提交后 search 立刻读到新值（活引用
   if (missing.length > 0) return t.skip('host deps unavailable: ' + missing.join(', '))
   const host = await makeHost()
   try {
-    apply(host.ctx, { url: 'http://127.0.0.1:18080/search?format=json' })
+    apply(host.ctx, { api: 'generic', url: 'http://127.0.0.1:18080/search?format=json' })
     await host.settle()
     await host.store.update('web-search-custom', { url: 'http://127.0.0.1:19090/search?format=json' })
     const calls = []
@@ -144,7 +144,7 @@ test('host-contract: 真实选择语义——唯一可用 / 未注册 / 不可�
   // 未配置 + 唯一可用 provider → 选中我们（不抛 = 被选中）
   const unique = await makeHost()
   try {
-    apply(unique.ctx, { url: 'http://127.0.0.1:18080/search?format=json' })
+    apply(unique.ctx, { api: 'generic', url: 'http://127.0.0.1:18080/search?format=json' })
     await unique.settle()
     const calls = []
     const restore = stubFetch(calls, SAMPLE)
@@ -154,7 +154,7 @@ test('host-contract: 真实选择语义——唯一可用 / 未注册 / 不可�
   // configured id 未注册 → WEB_PROVIDER_CONFIGURED_MISSING
   const gone = await makeHost({ searchProvider: 'nope' })
   try {
-    apply(gone.ctx, { url: 'http://127.0.0.1:18080/search?format=json' })
+    apply(gone.ctx, { api: 'generic', url: 'http://127.0.0.1:18080/search?format=json' })
     await gone.settle()
     await assert.rejects(() => gone.web.search({ query: 'x' }),
       (error) => error.code === 'WEB_PROVIDER_CONFIGURED_MISSING')
@@ -163,7 +163,7 @@ test('host-contract: 真实选择语义——唯一可用 / 未注册 / 不可�
   // configured id 是我们但不可用（url 为空）→ WEB_PROVIDER_CONFIGURED_UNAVAILABLE
   const unusable = await makeHost({ searchProvider: SEARCH_PROVIDER_ID })
   try {
-    apply(unusable.ctx, { url: '' })
+    apply(unusable.ctx, { api: 'generic', url: '' })
     await unusable.settle()
     await assert.rejects(() => unusable.web.search({ query: 'x' }),
       (error) => error.code === 'WEB_PROVIDER_CONFIGURED_UNAVAILABLE')

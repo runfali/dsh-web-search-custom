@@ -64,7 +64,7 @@ test('entry: 模块可加载且契约常量正确', () => {
 
 test('entry: apply 注册 custom 搜索 provider 并接线 settings', () => {
   const { ctx, providers, installed } = makeCtx()
-  apply(ctx, { url: 'http://127.0.0.1:8080/search?format=json&q={query}' })
+  apply(ctx, { api: 'generic', url: 'http://127.0.0.1:8080/search?format=json&q={query}' })
   assert.equal(providers.length, 1)
   const p = providers[0]
   assert.equal(p.id, 'custom')
@@ -79,16 +79,17 @@ test('entry: apply 注册 custom 搜索 provider 并接线 settings', () => {
 
 test('behavior: available 拒绝非法配置（无 url / 非 http(s)）', () => {
   const { ctx, providers } = makeCtx()
-  apply(ctx, { url: '' })
+  apply(ctx, { api: 'generic', url: '' })
   assert.equal(providers[0].available(), false)
   const { ctx: ctx2, providers: p2 } = makeCtx()
-  apply(ctx2, { url: 'gopher://x' })
+  apply(ctx2, { api: 'generic', url: 'gopher://x' })
   assert.equal(p2[0].available(), false)
 })
 
 test('behavior: search 默认 GET 自动补 q=，结果映射去重', async () => {
   const { ctx, providers } = makeCtx()
   apply(ctx, {
+    api: 'generic',
     url: 'http://127.0.0.1:8080/search?format=json',
     resultsPath: 'results',
     urlField: 'url',
@@ -131,7 +132,7 @@ test('behavior: search 默认 GET 自动补 q=，结果映射去重', async () =
 
 test('behavior: search 遇 HTTP 错误抛状态', async () => {
   const { ctx, providers } = makeCtx()
-  apply(ctx, { url: 'http://127.0.0.1:8080/search?format=json' })
+  apply(ctx, { api: 'generic', url: 'http://127.0.0.1:8080/search?format=json' })
   const realFetch = globalThis.fetch
   globalThis.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error: 'down' }) })
   try {

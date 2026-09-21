@@ -158,3 +158,47 @@ Interpreter detail: `node --test tests/*.test.mjs` uses an explicit glob because
 - `host-integration.test.mjs` uses the file-backed settings provider for write
   coverage; the in-memory `SettingsProvider` base class is read-only by design
   and cannot exercise the write path.
+
+
+## Round 6 — AnySearch live evidence (v0.2.0, dsh 0.1.5-rc.2, 2026-09-21)
+
+This round is provider-internal and the endpoint is external, so evidence was collected on the live host (no isolated instance needed).
+
+### Anonymous (keyless) end-to-end through the real seam
+
+```text
+$ DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' node tests/live-search.mjs 'DeepSeek Harness plugin'
+query = DeepSeek Harness plugin
+sources = 5 truncated = false
+ - https://www.deepseek.com/harness/en/ | DeepSeek Harness developer preview: Everything is a ...
+ - https://github.com/deepseek-ai/deepseek-harness | DeepSeek Harness: Everything is a Plugin.
+LIVE OK
+```
+
+Chain: our provider -> real `WebRuntime` -> real `fetch` -> AnySearch gateway -> envelope mapping -> `sources[]`.
+This path sends no Authorization header (asserted in unit tests; the live run proves the anonymous tier accepts it).
+
+### Invalid key path
+
+```text
+$ DSH_WSC_LIVE_BAD_KEY=1 node tests/live-search.mjs 'Kubernetes node 内存监控'
+bad-key error = AnySearch search failed: HTTP 401 (code -1) Invalid API key. request_id=25ba37be-... check the "apiKey" setting ...
+LIVE BAD-KEY OK (401/403 envelope + request_id + hint)
+```
+
+### Test totals (same run)
+
+| Command | Result |
+|---|---|
+| `npm test` | `tests 39 / pass 39 / fail 0` plus client-smoke 17 checks |
+| `node --test tests/anysearch.test.mjs` | 16/16 |
+| RED baseline before implementation | 10 failed / 5 passed |
+
+### Known non-runnable surface (honest gap)
+
+The browser half could not be curl-verified on this host: the dsh web UI sits behind the login
+gateway (`http://127.0.0.1:3080` answers 401 without a session), so `__DSH_BOOT__` / combo-URL
+extraction is unavailable from the shell. The client card change is covered by
+`tests/client-smoke.mjs` (bundle load, 15 field rows rendered, locale parity, save/reset write path),
+the strongest check available without a session.
+

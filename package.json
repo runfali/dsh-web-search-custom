@@ -1,7 +1,7 @@
 {
   "name": "dsh-web-search-custom",
-  "version": "0.1.5-rc.1",
-  "description": "Generic URL + optional API key search provider for the DeepSeek Harness web profile (ctx.web), with an in-settings configuration card. Zero-intrusion bundle plugin; works with any SearXNG-compatible JSON endpoint.",
+  "version": "0.2.0",
+  "description": "Search provider for the DeepSeek Harness web profile (ctx.web): defaults to the AnySearch unified API (anonymous free tier works with no API key; add a key for the paid quota), and still speaks any SearXNG-compatible JSON endpoint. Includes an in-settings configuration card. Zero-intrusion bundle plugin.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -28,6 +28,7 @@
     "dsh-plugin",
     "deepseek-harness",
     "web-search",
+    "anysearch",
     "searxng",
     "search-engine"
   ],

@@ -8,31 +8,25 @@
 #
 # 本补丁做两件事：
 #   1. 把 host 层 web 服务的搜索 provider 固定为 custom；
-#   2. 挂载本插件的 provider 行，默认指向本机 SearXNG
-#      http://127.0.0.1:8080/search?format=json&q={query}（无需 key）。
+#   2. 挂载本插件的 provider 行，出厂默认指向 AnySearch 统一搜索入口
+#      https://api.anysearch.com/v1/search（api: auto → 识别为 anysearch 档）。
 #
-# url 支持 {query} / {apiKey} 占位符；不带 {query} 时自动追加 q= 参数。
-# apiKey 为空则不发鉴权头；非空时默认以 "Authorization: Bearer <key>" 发送，
-# 除非 url 或 POST body 里已出现 {apiKey}。
+# 免 key / 带 key 两态（由 apiKey 是否为空决定，凭据永远只在本机）：
+#   apiKey: ''          → 匿名免费档：请求完全不发 Authorization 头，走按 IP 限流的每日免费额度
+#   apiKey: 'sk-xxxx'   → 鉴权档：发送 Authorization: Bearer sk-xxxx，走该 key 的付费配额
+#
+# 档位（api 字段）：auto（默认，按 URL 主机名判定）| anysearch | generic。
+#   anysearch 档：POST + {"query","max_results"}，响应取 data.results[].{title,url,snippet|content}。
+#                 只认 url / apiKey / headers / timeoutMs / maxResults 五个字段。
+#   generic 档（SearXNG 等任意 JSON 接口）：GET/POST 模板、authHeader/authScheme、
+#                 点路径字段映射、{query}/{queryRaw}/{apiKey} 占位符。
+#
+# 需要 AnySearch 的 tag/params/zone/language（垂直检索）时，用 api: generic + body 模板表达，
+# 例如 body: '{"query":"{queryRaw}","tag":"code.doc","params":{"library":"golang"},"max_results":5}'
 #
 # To change the endpoint or key, override in your profile's user layer
-# (~/.dsh/profiles/web/cordis.patch.yml). A patch replaces the whole config
-# block, so write every key when overriding:
-#   - id: web-search-custom
-#     config:
-#       url: 'http://127.0.0.1:8080/search?format=json&q={query}'
-#       apiKey: ''
-#       method: GET
-#       body: '{"query":"{query}"}'
-#       headers: '{}'
-#       authHeader: Authorization
-#       authScheme: Bearer
-#       timeoutMs: 30000
-#       resultsPath: results
-#       urlField: url
-#       titleField: title
-#       snippetField: content
-#       publishedField: publishedDate
+# (~/.dsh/profile/web/cordis.patch.yml) or fill it in the Settings → Plugins card.
+# A patch replaces the whole config block, so write every key when overriding:
 - id: web
   config:
     searchProvider: custom
@@ -41,8 +35,10 @@
     - id: web-search-custom
       name: 'dsh-web-search-custom'
       config:
-        url: 'http://127.0.0.1:8080/search?format=json&q={query}'
+        api: auto
+        url: 'https://api.anysearch.com/v1/search'
         apiKey: ''
+        maxResults: 10
         method: GET
         body: '{"query":"{query}"}'
         headers: '{}'

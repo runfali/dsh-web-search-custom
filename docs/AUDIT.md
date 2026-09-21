@@ -5,6 +5,66 @@
 
 ---
 
+# 第 6 轮：适配 AnySearch（2026-09-21，v0.2.0）
+
+> 审计对象：v0.2.0（工作树）
+> 宿主：@deepseek-ai/dsh **0.1.5-rc.2**（/usr/lib/node_modules 实装版本）
+> 触发：用户要求接入 https://www.anysearch.com/docs/api-endpoints，且「带 key 走鉴权、不带 key 免 key」
+> 方法：官方文档实测取证 → 缺口分析 → TDD（先写失败测试）→ 真宿主契约测试 → 真端点端到端
+
+## 0. 开工前实测取证（不靠文档转述）
+
+| 探针 | 结果 | 结论 |
+|---|---|---|
+| 旧默认端点（内网 SearXNG 10.200.0.5:8080） | `q=deepseek` / `q=anysearch` 均返回 **0 条**，baidu/bing/sogou/startpage/wikipedia 全 timeout | 旧默认已实质失效：本轮不只是「换引擎」，而是修复 |
+| AnySearch 匿名（无 Authorization） | HTTP 200、1.6–2.1s；直连与走代理均通 | 免 key 可行；宿主直连可达（DNS 落 cn.gtm.anysearch.com），插件无需内置代理 |
+| 无效 key | HTTP 401 `{"code":-1,"message":"Invalid API key.","error_code":"invalid_api_key"}` | 鉴权档失败是硬错误，**不会静默回落匿名** |
+| 未知 tag | HTTP 400 `Invalid tag: nope.nothing.` | 参数错误走 error envelope，可原样上报 |
+| `max_results` 传 20 / 0 | 都返回 10 条 | 服务端夹取 1–10；插件侧仍显式夹取，语义明确 |
+| query 被 URL 编码（`Go%201.26%20release%20notes`） | 返回**完全无关**的结果 | 旧 generic 档「POST body 里塞编码后的 query」是真 bug，anysearch 档必须用原始 query |
+| 402 语义（官方文档） | 额度耗尽时响应体含自动生成的 username/password/api_key | 必须脱敏，不得进日志或错误文本 |
+
+## 1. 设计判据（为什么新增 `api` 档位而不是改写 generic）
+
+- 厂商契约与 generic 档**不是超集关系**：anysearch 固定 POST、固定 `{query,max_results}` 信封、固定 `data.results` 路径与 `snippet|content` 语义；且「无 key = 匿名档」是**厂商特性**（generic 档的无 key 只是「不加鉴权头」，语义不同）。
+- 因此按**档位**建模（`auto | anysearch | generic`），而不是往 generic 里塞 if。`auto` 按 URL 主机名判定 `*.anysearch.com`，保住「改 URL 即生效」的直觉。
+- 向后兼容：未设 `api` 且 URL 非 AnySearch 的存量配置，行为与 v0.1.5 一致（有测试钉住）。
+
+## 2. 实现面（结论：**无 P0/P1**）
+
+| 项 | 判定 | 证据 |
+|---|---|---|
+| 免 key / 带 key 两态 | ✅ | `apiKey` 为空时 `buildHeaders` 根本不写 Authorization（测试断言**头名不存在**，而非断言空值） |
+| 错误信封保真 | ✅ | 错误文本带 HTTP 状态 + 厂商 message + `request_id`；401/402/429 各附处置提示 |
+| 402 凭据脱敏（原 P1 风险，已消） | ✅ | `redactCredentials` 抹 `api_key=`/`password=`/`username=`/`secret=`/`token=` 与 `sk-*` 形态；测试用真实形状 402 载荷断言 key 与密码不出现在 message 中 |
+| `max_results` 算术 | ✅ | 取 `min(配置值, 调用方 maxResults)` 再夹 1–10；6 组边界用例（含 caller 缺失、配置越界） |
+| 病态载荷 | ✅ | `data` 为 null / `results` 为字符串 / 载荷为字符串或 null → 一律降级 `{sources:[],truncated:false}` 不抛 |
+| 向后兼容 | ✅ | generic 档 GET 补 `q=`、URL 编码、字段映射、`{apiKey}` 优先级全部原样；新增 `{queryRaw}` 不改 `{query}` 语义 |
+| 键集合一致性（四处） | ✅ | host schema ↔ client FIELD_KEYS ↔ FIELD_VIEWS ↔ 补丁 config，测试逐键比对（新增 `api`/`maxResults` 后仍对齐） |
+| 文档承诺 = 行为 | ✅ | README 双语「anysearch 档只认 5 个字段」与实现一致；垂直检索给出 generic 写法而非虚构字段 |
+
+### P2（已处理）
+
+- anysearch 档下 `method`/`body`/`authHeader`/`authScheme`/字段映射会**静默忽略**，属「配置了不生效」体感：已在设置卡标签标注「仅 generic」，并在 README 配置表中逐项写明作用域。
+
+## 3. 测试面（TDD 证据链）
+
+| 阶段 | 命令 | 结果 |
+|---|---|---|
+| RED | `node --test tests/anysearch.test.mjs`（实现前） | **10 失败 / 5 通过**（通过项正是「向后兼容」现状，反证测试有效） |
+| GREEN | 同上（实现后） | **16/16 通过** |
+| 回归 | `npm test` | **39/39 通过** + client-smoke 17 项通过 |
+| 真宿主 | `npm test` 内 host-integration | 真 Cordis + 真 WebRuntime + 真文件 settings provider 全链路通过 |
+| 真端点 | `DSH_WSC_LIVE_URL=... node tests/live-search.mjs` | 匿名档 5 条真实结果 LIVE OK；`DSH_WSC_LIVE_BAD_KEY=1` 时 401 信封 + request_id + 处置提示 LIVE BAD-KEY OK |
+
+RED 阶段两条假绿教训（已修正断言口径）：① HTTP 头名大小写不敏感，断言必须按小写查名，不能断言 `headers.authorization` 字面量；② 断言「不发鉴权头」要断言**头名不存在**，只断言值为 undefined 会被 `{}[key]` 也满足。
+
+## 4. 遗留（P3，不阻塞交付）
+
+- 垂直检索要求用户手写 generic body（未做 `tag`/`params`/`zone`/`language` 专用字段）：刻意 YAGNI，等真有场景再加。
+- `available()` 不发网络请求（seam 契约要求廉价），因此「key 有效但额度耗尽」只能在首次搜索时以 402 暴露。
+
+
 # 第 5 轮：适配 dsh 0.1.5-rc.1（2026-09-10）
 
 > 审计对象：**v0.1.5-rc.1**（工作树，未推送）
