@@ -281,6 +281,20 @@ npm run test:host    # real Cordis + WebRuntime + file settings provider
 | `tests/client-smoke.mjs` | Browser half: bundle id, short service names, locale parity, slot registration contract, card rendering, save/reset write path, read-only disabling |
 | `tests/live-search.mjs` | Opt-in live check against a real endpoint: `DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' node tests/live-search.mjs` (add `DSH_WSC_LIVE_BAD_KEY=1` to also assert the invalid-key error path) |
 
+### Live checks (opt-in, they hit the network)
+
+```bash
+# end-to-end through the real seam against a live endpoint
+DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' node tests/live-search.mjs 'your query'
+# the same, plus the invalid-key error path
+DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' DSH_WSC_LIVE_BAD_KEY=1 node tests/live-search.mjs 'your query'
+# two-arm control: prove the user-layer url is what decides, and that the new default returns results
+DSH_WSC_LIVE_PARITY=1 node tests/live-settings-parity.mjs
+```
+
+The default `npm test` suite stays offline-runnable; these scripts print `SKIP` unless the
+environment variable above is set.
+
 ```text
 src/index.js          host half — settings namespace, profile dispatch, result mapping
 lib/client.js         browser half — settings card (hand-written bundle, no build step)

@@ -254,6 +254,19 @@ npm run test:host    # 真实 Cordis + WebRuntime + 文件型 settings provider
 | `tests/client-smoke.mjs` | 浏览器半：bundle id、短服务名、双语词典键集合一致、槽位注册契约、卡片渲染、保存/重置写路径、只读态禁用 |
 | `tests/live-search.mjs` | 可选的真端点活体检查：`DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' node tests/live-search.mjs`（加 `DSH_WSC_LIVE_BAD_KEY=1` 可一并验证无效 key 的错误路径） |
 
+### 活体检查（默认跳过，会打真实网络）
+
+```bash
+# 真实端点 → 真实 seam 全链路
+DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' node tests/live-search.mjs '你的查询'
+# 同上，外加无效 key 的错误路径
+DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' DSH_WSC_LIVE_BAD_KEY=1 node tests/live-search.mjs '你的查询'
+# 双臂对照：证明「用户层 url 决定实际请求」，且新默认真的能出结果
+DSH_WSC_LIVE_PARITY=1 node tests/live-settings-parity.mjs
+```
+
+默认 `npm test` 套件保持离线可跑；未设上面的环境变量时这些脚本打印 `SKIP` 后退出。
+
 ```text
 src/index.js          host 半——设置命名空间、档位分派、结果映射
 lib/client.js         浏览器半——设置卡（手写 bundle，无构建步骤）
