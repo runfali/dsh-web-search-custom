@@ -3,7 +3,8 @@
  * 直测宿主入口的 apply 驱动：
  *   1. 模块可加载（任何 import / 顶层求值错误当场炸出）
  *   2. web.registerSearchProvider 注册了 custom provider（id/available/search 形状）
- *   3. settings.installSection 接线（ctx.inject(['settings']) 回调被驱动）
+ *   3. 0.1.7 settings 接线：ctx.inject(['settings']) 回调被驱动，且 configure({auto:false})
+ *      的 disposer 交给 sub-ctx 的 effect 回收（installSection 已移除）
  *   4. provider.search 行为模拟：模板 URL 填充、GET 自动补 q=、映射去重
  *
  * 运行：node --test tests/*.mjs
@@ -11,15 +12,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-// 设置 DSH 环境变量隔离：不污染真实配置（search 用 fetch stub，不发网络）
 const { apply, name, inject, SEARCH_PROVIDER_ID, WEB_SEARCH_CUSTOM_SETTINGS_NAMESPACE, Config } =
   await import('../src/index.js')
 
 function makeCtx() {
   const providers = []
-  let installed = null
+  const events = []
   const ctx = {
     logger: { info() {}, warn() {}, error() {}, debug() {} },
+    fiber: { name: 'web-search-custom' },
     effect(fn) {
       const d = fn()
       return typeof d === 'function' ? d : () => {}
@@ -28,16 +29,15 @@ function makeCtx() {
     inject(services, cb) {
       // 模拟 settings 服务就绪（宿主语义：settings 晚到也回调）
       cb({
+        effect(fn) {
+          events.push('sub-effect')
+          const d = fn()
+          return typeof d === 'function' ? d : () => {}
+        },
         settings: {
-          installSection(owner, ns, schema, entry, hooks) {
-            installed = { owner, ns, schema, entry, hooks }
-            // 模拟 register → resolved 值（含默认值填充）
-            const resolved = { ...entry }
-            for (const [k, v] of Object.entries(schema()) || []) {
-              if (resolved[k] === undefined) resolved[k] = v
-            }
-            if (hooks?.setSource) hooks.setSource(() => resolved)
-            if (hooks?.onChange) hooks.onChange()
+          configure(presentation, owner) {
+            events.push({ configure: presentation, owner })
+            return () => { events.push('configure-disposed') }
           },
         },
       })
@@ -50,7 +50,7 @@ function makeCtx() {
       },
     },
   }
-  return { ctx, providers, installed: () => installed }
+  return { ctx, providers, events }
 }
 
 test('entry: 模块可加载且契约常量正确', () => {
@@ -63,7 +63,7 @@ test('entry: 模块可加载且契约常量正确', () => {
 })
 
 test('entry: apply 注册 custom 搜索 provider 并接线 settings', () => {
-  const { ctx, providers, installed } = makeCtx()
+  const { ctx, providers, events } = makeCtx()
   apply(ctx, { api: 'generic', url: 'http://127.0.0.1:8080/search?format=json&q={query}' })
   assert.equal(providers.length, 1)
   const p = providers[0]
@@ -71,10 +71,10 @@ test('entry: apply 注册 custom 搜索 provider 并接线 settings', () => {
   assert.equal(typeof p.available, 'function')
   assert.equal(typeof p.search, 'function')
   assert.equal(p.available(), true)
-  // settings 接线：ns 正确、schema 是 Config、hooks 提供 setSource
-  const ins = installed()
-  assert.ok(ins, 'installSection must have been called')
-  assert.equal(ins.ns, 'web-search-custom')
+  // 0.1.7 settings 接线：configure({auto:false}, fiber) 在 sub-ctx 的 effect 里注册
+  const configureEvents = events.filter((event) => typeof event === 'object')
+  assert.equal(configureEvents.length, 1, 'exactly one configure call')
+  assert.deepEqual(configureEvents[0], { configure: { auto: false }, owner: ctx.fiber })
 })
 
 test('behavior: available 拒绝非法配置（无 url / 非 http(s)）', () => {

@@ -100,17 +100,28 @@ provider 选择遵循能力缝自身的规则，且在调用时刻解析：配�
 
 | 项 | 值 |
 |---|---|
-| DeepSeek Harness | `>=0.1.2-alpha.3 <0.2.0 || >=0.1.5-alpha.1 <0.1.6`（已在 0.1.2-alpha.4、0.1.5-rc.1、0.1.5-rc.2 实测） |
+| DeepSeek Harness | `>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8`（已在 0.1.2-alpha.4、0.1.5-rc.1、0.1.5-rc.2、0.1.7-rc.1 实测） |
 | Node.js | `^22.19.0 || >=24.0.0` |
-| 运行时依赖 | **无**——三个 peer 全部由 dsh 宿主自带 |
+| 运行时依赖 | **无**——peer 全部由 dsh 宿主自带 |
 | 网络 | dsh 宿主到你所配置端点的出站访问（AnySearch 解析到其国内网关） |
 | AnySearch API key | **可选**——匿名档不需要 |
 
 dsh 区间声明在 `dsh.engines.dsh`（并在 `peerDependencies` 里镜像到插件依赖的 dsh 包）。
 这个析取区间是**承重的、不是装饰**：npm semver 只让「区间内含同一
 `[major, minor, patch]` 元组预发布」的分组满足预发布版本，所以单写 `<0.2.0` 的
-分组**覆盖不了** `0.1.5-rc.1`。`tests/entry.test.mjs` 用判定表 + 对旧单区间的反证
-把这条钉死。
+分组**覆盖不了** `0.1.5-rc.1` 与 `0.1.7-rc.1`。dsh 自己在安装/启动 preflight 里
+用 `includePrerelease: true` 校验同一批 peer——**那道闸更宽松**，正因如此 pnpm 严格
+semver 这一侧需要单独的反证：`tests/entry.test.mjs` 用判定表 + 对旧单区间的反证钉死，
+`tests/host-integration.test.mjs` 再拿宿主真实的 `evaluatePluginCompatibility` 与真实
+`semver` 各跑一遍。
+
+> [!IMPORTANT]
+> **dsh 0.1.7 换了设置模型。** 本插件已适配 `0.1.7-rc.1`：
+> `settings.installSection()` 已移除（导出的 `Config` schema **就是**命名空间，且字段
+> 必须 `.volatile()` 才能热编辑）；浏览器侧 `settingsScope` 服务改为 `configForms`；
+> 设置卡从已移除的 `settings.plugin.item` 槽位迁到**插件页**的 `plugins.item`。
+> 卡片改用官方共享表单原语渲染，观感与内置 provider 卡一致。详见
+> [docs/DSH-0.1.7-ADAPTATION.md](docs/DSH-0.1.7-ADAPTATION.md)。
 
 ## 安装
 
@@ -122,7 +133,7 @@ dsh plugin --profile web add dsh-web-search-custom
 
 ## 在设置页配置
 
-打开 Web UI 的 **设置 → 插件配置**，展开「自定义搜索（web-search-custom）」卡片：
+打开 Web UI 的 **设置 → 插件**，点进「自定义搜索（web-search-custom）」详情页，在表单里编辑：
 
 - 接口档位（`auto` / `anysearch` / `generic`）；
 - 搜索 URL（默认已是 AnySearch）；
@@ -132,8 +143,9 @@ dsh plugin --profile web add dsh-web-search-custom
 - 结果字段映射（`resultsPath` / `urlField` / `titleField` /
   `snippetField` / `publishedField`，仅 generic 档）。
 
-保存后写回 dsh 设置文档的 `web-search-custom:` 段并**立即生效**——下一次搜索就用新值，
-无需重启。「已覆盖 / 重置」徽标行为与官方插件卡一致。
+保存后写回 profile 补丁文档（`$DSH_HOME/profiles/web/cordis.patch.yml`）里的
+`web-search-custom` 条目并**立即生效**——下一次搜索就用新值，无需重启。表单外观、
+「已覆盖 / 重置」徽标与只读提示用的都是官方 provider 卡同款共享组件。
 
 若旧版本曾把别的 URL 钉在这里，请在该字段上点「重置」再保存，让出厂的 AnySearch 默认值
 重新生效。
@@ -241,17 +253,21 @@ dsh plugin --profile web remove dsh-web-search-custom
 ## 开发与测试
 
 ```bash
-npm install          # 开发依赖（dsh 包，供宿主契约测试使用）
-npm test             # node --test tests/*.test.mjs && node tests/client-smoke.mjs
-npm run test:host    # 真实 Cordis + WebRuntime + 文件型 settings provider
+pnpm install         # 开发依赖（@deepseek-ai/dsh + dsh-settings 0.1.7-rc.1、
+                     # schemastery 3.18.4 —— 宿主契约测试加载的是真实包）
+pnpm test            # node --test tests/*.test.mjs && node tests/client-smoke.mjs
+pnpm run test:host   # 只跑宿主契约那一组
 ```
+
+开发安装请用 `pnpm`：`dsh` 这个 devDependency 会带进若干原生子进程辅助包，其构建脚本
+必须显式谢绝（见 `pnpm-workspace.yaml` 的 `allowBuilds`）——本项目本身不需要任何原生构建。
 
 | 测试 | 证明了什么 |
 |---|---|
-| `tests/entry.test.mjs` | 真实入口加载（`import('../src/index.js')`）、manifest 声明、engines 判定表（手写比较器 + 反证 + 与宿主真实 `semver.satisfies` 交叉验证）、四处键集合一致性（host schema ↔ client 字段 ↔ client 视图 ↔ 补丁 config）、settings 热更新活引用、依赖卫生 |
+| `tests/entry.test.mjs` | 真实入口加载（`import('../src/index.js')`）、manifest 声明、0.1.7 settings 命名空间来源（`Config` 导出、15 字段全 `.volatile()`、`{get()}` 活引用、`configure({ auto: false })`）、engines 判定表（手写比较器 + 反证 + 与宿主真实 `semver.satisfies` 交叉验证）、四处键集合一致性（host schema ↔ client 字段 ↔ client 视图 ↔ 补丁 config）、词典键一致性、已移除 client API 的静态防回退、依赖卫生 |
 | `tests/anysearch.test.mjs` | anysearch 档：auto 判定、免 key 与 Bearer 两态请求头、`max_results` 取值算术、厂商信封映射、错误信封（`message` + `request_id` + 402 凭据脱敏），以及 generic 档不回归 |
-| `tests/host-integration.test.mjs` | 由真实 `@deepseek-ai/cordis` Context、真实 `ctx.web` 运行时、真实文件型 settings provider 驱动：provider 注册、`web.search()` 全链路、seam 的 `maxResults` 截断、设置提交 → 下次调用即生效、seam 的选择语义 |
-| `tests/client-smoke.mjs` | 浏览器半：bundle id、短服务名、双语词典键集合一致、槽位注册契约、卡片渲染、保存/重置写路径、只读态禁用 |
+| `tests/host-integration.test.mjs` | 用真实宿主包驱动：真实 Cordis + WebRuntime + 真实 `@deepseek-ai/cosmokit` volatile 协议（模拟一次 `_commitVolatile` 提交，下一次搜索必须读到新值）、真实 `dsh-settings` schema 助手（`volatileForm` / `isVolatilePath` / `projectForm` / `plainConfig`）、对本卡依赖的 client 包做源码级断言，以及宿主真实 `evaluatePluginCompatibility` + `semver` 对声明区间的判定 |
+| `tests/client-smoke.mjs` | 浏览器半：bundle id、短服务名、双语词典键集合一致、`configForms.whileServed` 门控、`plugins.item` 注册契约（id/order/label thunk）、双视图（`summary` 一行文案 vs `page` 表单）、保存/重置写路径、非法输入拦截、只读态禁用与只读写入拒绝 |
 | `tests/live-search.mjs` | 可选的真端点活体检查：`DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' node tests/live-search.mjs`（加 `DSH_WSC_LIVE_BAD_KEY=1` 可一并验证无效 key 的错误路径） |
 
 ### 活体检查（默认跳过，会打真实网络）
@@ -265,11 +281,11 @@ DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' DSH_WSC_LIVE_BAD_KEY=1 no
 DSH_WSC_LIVE_PARITY=1 node tests/live-settings-parity.mjs
 ```
 
-默认 `npm test` 套件保持离线可跑；未设上面的环境变量时这些脚本打印 `SKIP` 后退出。
+默认 `pnpm test` 套件保持离线可跑；未设上面的环境变量时这些脚本打印 `SKIP` 后退出。
 
 ```text
 src/index.js          host 半——设置命名空间、档位分派、结果映射
-lib/client.js         浏览器半——设置卡（手写 bundle，无构建步骤）
+lib/client.js         浏览器半——设置卡（手写 bundle，无构建步骤；用官方表单原语渲染）
 cordis.patch.yml      bundle 补丁：选中 provider "custom" 并挂载插件
 tests/                entry + anysearch + 宿主契约 + client-smoke + 可选活体检查
 ```

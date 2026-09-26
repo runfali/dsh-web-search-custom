@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-search-custom",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Search provider for the DeepSeek Harness web profile (ctx.web): defaults to the AnySearch unified API (anonymous free tier works with no API key; add a key for the paid quota), and still speaks any SearXNG-compatible JSON endpoint. Includes an in-settings configuration card. Zero-intrusion bundle plugin.",
   "type": "module",
   "main": "src/index.js",
@@ -14,6 +14,7 @@
     "lib",
     "tests",
     "cordis.patch.yml",
+    "docs/DSH-0.1.7-ADAPTATION.md",
     "README.md",
     "README.zh-CN.md",
     "LICENSE"
@@ -36,20 +37,31 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-settings": ">=0.1.2-alpha.3 <0.2.0 || >=0.1.5-alpha.1 <0.1.6",
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/dsh": ">=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8",
+    "@deepseek-ai/dsh-settings": ">=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8",
+    "@deepseek-ai/schemastery": "~3.18.4",
     "react": "^18.0.0"
   },
   "dsh": {
     "engines": {
-      "dsh": ">=0.1.2-alpha.3 <0.2.0 || >=0.1.5-alpha.1 <0.1.6"
+      "dsh": ">=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8"
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
     "client": {
-      "platform": "web"
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
     }
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-settings": "0.1.7-rc.1"
   },
   "repository": {
     "type": "git",

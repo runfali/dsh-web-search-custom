@@ -1,11 +1,29 @@
+# 测试与真实加载都不需要任何原生构建：显式落定 false（pnpm 12 的 ERR_PNPM_IGNORED_BUILDS
+# 需要显式选择，否则 install 以非零码退出）。
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': false
+  '@google/genai': false
+  koffi: false
+  node-pty: false
+  protobufjs: false
+
+# 若环境开启了 pnpm 的供应链等待期（minimumReleaseAge），本轮锁定使用的预发布版本需要
+# 先加白名单，否则 install 会静默退回旧版本（本机当前未启用该策略，列在此处是为了换机/换 CI
+# 时行为一致）。仅覆盖本仓 devDeps 真正需要的根包与其直接依赖。
 minimumReleaseAgeExclude:
-  - '@deepseek-ai/dsh-brand@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-invariants@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-llm@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-scope@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-session@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-settings@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-timeout@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-typert-protocol@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-util-crypto@0.1.5-rc.1'
-  - '@deepseek-ai/dsh-util-values@0.1.5-rc.1'
+  - '@deepseek-ai/dsh@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-settings@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-app-boot@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-config-editor@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-atomic-write@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-package-manifest@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-util-values@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-session@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-llm@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-brand@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-invariants@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-scope@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-timeout@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-typert-protocol@0.1.7-rc.1'
+  - '@deepseek-ai/dsh-util-crypto@0.1.7-rc.1'
+  - '@deepseek-ai/schemastery@3.18.4'

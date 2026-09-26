@@ -6,15 +6,20 @@
  *   带 apiKey → Authorization: Bearer；不带 → 匿名免费档（完全不发鉴权头）。
  * - generic：通用 JSON 档（GET/POST 模板 + 字段映射），SearXNG 等端点照旧可用。
  *
- * - Host 侧：注册 web-search-custom 设置命名空间（Settings 页面可填参数）。
- * - 浏览器侧（lib/client.js）：在「设置 → 插件配置」里提供配置卡片。
- *
- * 除 dsh 平台自带的 @deepseek-ai/dsh-settings / @deepseek-ai/schemastery 外
+ * - Host 侧：导出 volatile Config —— 声明即设置命名空间（ns = cordis 行 id
+ *   'web-search-custom'）；浏览器侧（lib/client.js）在「插件」页注册同名设置卡。
+ * - 除 dsh 平台自带的 @deepseek-ai/dsh-settings / @deepseek-ai/schemastery 外
  * 无任何第三方依赖；不改 dsh 源码。
+ *
+ * dsh 0.1.7-rc.1 契约（本仓库适配轮，宿主源码级核对）：
+ * - settings.installSection() 已移除；dsh-settings 的 describe() 直接枚举「active
+ *   且含 volatile 字段的 Config」的入口，ns = cordis 行 id —— Config 声明即命名空间。
+ * - 可热编辑字段必须 .volatile()：volatile-only 变更经 loader _commitVolatile
+ *   原地提交（不重启 fiber），apply 收到的对应字段是 {get()} 活引用。
+ * - 自带卡片的插件按 dsh-settings README 的配方注册展示策略
+ *   settings.configure({ auto: false }, fiber)，关闭宿主按 schema 自动生成的页面。
  */
 import z from '@deepseek-ai/schemastery'
-// dsh 0.1.2-alpha.3：installSettingsSection/settingsNamespace 已从 dsh-settings 移除，
-// 设置接线改用 provider 方法 settings.installSection(owner, ns, schema, entry, hooks)。
 
 /** Cordis 插件短名（路由/日志用）。 */
 export const name = 'web-search-custom'
@@ -23,9 +28,27 @@ export const name = 'web-search-custom'
 export const SEARCH_PROVIDER_ID = 'custom'
 
 /** Settings 命名空间（浏览器卡片与 host 共用同一字符串）。
- * dsh 0.1.2-alpha 起 settingsNamespace() brand 辅助已移除；
- * 命名空间在 settings.register/installSection 处校验（小写连字符标识符）。 */
+ * 0.1.7 起命名空间就是 cordis 行 id（本插件 = 'web-search-custom'，与
+ * cordis.patch.yml 的 insert id 一致）；Config 导出即声明命名空间。 */
 export const WEB_SEARCH_CUSTOM_SETTINGS_NAMESPACE = 'web-search-custom'
+
+/** 读取配置字段：0.1.7 起 volatile 字段经 apply 收到的是 {get()} 活引用
+ * （cosmokit createVolatile 协议），普通字段是裸值。统一在此解引用，
+ * 新旧宿主形状都兼容。 */
+function readField(value) {
+  if (value !== null && typeof value === 'object' && typeof value.get === 'function' && !Array.isArray(value)) {
+    return value.get()
+  }
+  return value
+}
+
+/** 把整块配置逐字段解引用（volatile 活引用 → 当前值）。 */
+function readConfig(config) {
+  if (config === null || config === undefined) return {}
+  const out = {}
+  for (const [key, value] of Object.entries(config)) out[key] = readField(value)
+  return out
+}
 
 export const DEFAULT_TIMEOUT_MS = 30000
 
@@ -44,23 +67,28 @@ export const ANYSEARCH_HOSTS = ['anysearch.com', 'www.anysearch.com', 'api.anyse
 /** 需要 web 能力缝已就绪再 apply。 */
 export const inject = ['web']
 
-/** 设置命名空间的字段模式（也是 Settings 页面渲染/校验的依据）。 */
+/** 设置命名空间的字段模式（也是设置卡渲染/校验的依据）。
+ * 0.1.7 起：Config 必须从模块导出（cordis runtime.Config）——dsh-settings 的
+ * describe() 按「entry 有 volatileForm(schema)」枚举命名空间，未导出 = 宿主看不到
+ * 本命名空间 = client 半 whileServed 永不注册（插件页无配置入口）。
+ * 15 个字段全部 .volatile()：整段配置可在设置卡热编辑，改动经 _commitVolatile
+ * 原地提交、不重启 fiber（schema 其余约束仍逐字段校验）。 */
 export const Config = z.object({
-  api: z.string().default('auto'),
-  url: z.string().default(DEFAULT_URL),
-  apiKey: z.string().default(''),
-  maxResults: z.number().step(1).default(DEFAULT_MAX_RESULTS),
-  method: z.string().default('GET'),
-  body: z.string().default('{"query":"{query}"}'),
-  headers: z.string().default('{}'),
-  authHeader: z.string().default('Authorization'),
-  authScheme: z.string().default('Bearer'),
-  timeoutMs: z.number().step(1).min(1000).default(DEFAULT_TIMEOUT_MS),
-  resultsPath: z.string().default('results'),
-  urlField: z.string().default('url'),
-  titleField: z.string().default('title'),
-  snippetField: z.string().default('content'),
-  publishedField: z.string().default('publishedDate')
+  api: z.string().default('auto').volatile(),
+  url: z.string().default(DEFAULT_URL).volatile(),
+  apiKey: z.string().default('').volatile(),
+  maxResults: z.number().step(1).default(DEFAULT_MAX_RESULTS).volatile(),
+  method: z.string().default('GET').volatile(),
+  body: z.string().default('{"query":"{query}"}').volatile(),
+  headers: z.string().default('{}').volatile(),
+  authHeader: z.string().default('Authorization').volatile(),
+  authScheme: z.string().default('Bearer').volatile(),
+  timeoutMs: z.number().step(1).min(1000).default(DEFAULT_TIMEOUT_MS).volatile(),
+  resultsPath: z.string().default('results').volatile(),
+  urlField: z.string().default('url').volatile(),
+  titleField: z.string().default('title').volatile(),
+  snippetField: z.string().default('content').volatile(),
+  publishedField: z.string().default('publishedDate').volatile()
 })
 
 function toInt(value, fallback) {
@@ -82,9 +110,11 @@ function parseHeaders(headers) {
   }
 }
 
-/** 解析当前生效的 provider 选项（设置层 + 环境变量覆盖）。 */
-function resolveOptions(config) {
+/** 解析当前生效的 provider 选项（设置层 + 环境变量覆盖）。
+ * config 里 volatile 字段是 {get()} 活引用，先逐字段解引用再取值。 */
+function resolveOptions(rawConfig) {
   const env = process.env
+  const config = readConfig(rawConfig)
   const method = String(config.method || 'GET').toUpperCase()
   return {
     api: env.WEB_SEARCH_CUSTOM_API || config.api || 'auto',
@@ -413,27 +443,22 @@ async function searchAnySearch(options, request, callSignal, callerSignal) {
 }
 
 /**
- * Cordis apply：注册设置命名空间，并构造搜索 provider 注册到 ctx.web。
+ * Cordis apply：声明设置命名空间，并构造搜索 provider 注册到 ctx.web。
  * @param {object} ctx - cordis 上下文（已注入 web）。
- * @param {object} config - web-search-custom 行配置（作为设置的 composition base）。
+ * @param {object} config - web-search-custom 行配置（volatile 字段为 {get()} 活引用）。
  */
 export function apply(ctx, config = {}) {
-  let current = () => config
-  // dsh 0.1.2-alpha.3：独立 installSettingsSection 帮助函数已从 dsh-settings 移除，
-  // 同样的接线改为 provider 上的 settings.installSection(owner, ns, schema, entry, hooks)
-  // （宿主源码级核对：register(base=entry) → setSource(scope.get) → 卸载回落 effect →
-  // onChange() 同步首发 → scope.watch 持续通知）。settings 晚于本插件 apply 时到达，
-  // current() 闭包天然兼容晚接线。
+  // 0.1.7 起不再有 installSection：导出的 Config 即命名空间（ns = 行 id）。
+  // 本插件自带设置卡（client 半注册进插件页 plugins.item 槽位），故按 dsh-settings
+  // README 的配方关闭宿主按 schema 自动生成的默认页（configure 的 disposer 交给
+  // effect 回收；owner 显式传本插件 fiber 与官方示例一致）。
   ctx.inject(['settings'], (sctx) => {
-    sctx.settings.installSection(ctx, WEB_SEARCH_CUSTOM_SETTINGS_NAMESPACE, Config, config, {
-      setSource: (source) => {
-        current = source
-      },
-      onChange: () => {
-        // provider 每次搜索时读取 current()，无需主动刷新
-      }
-    })
+    sctx.effect(() => sctx.settings.configure({ auto: false }, ctx.fiber))
   })
+
+  // config 本身即活引用容器：volatile 字段经 readConfig/readField 每次现读，
+  // 设置卡保存（_commitVolatile 原地提交）后无需订阅即生效。
+  const current = () => config
 
   ctx.web.registerSearchProvider({
     id: SEARCH_PROVIDER_ID,

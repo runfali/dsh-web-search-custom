@@ -19,8 +19,14 @@ function makeCtx() {
     logger: { info() {}, warn() {}, error() {}, debug() {} },
     effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {} },
     on() { return () => {} },
+    fiber: { name: 'web-search-custom' },
+    // 0.1.7 settings 接线形状：installSection 已移除，改为 sub-ctx effect 里
+    // settings.configure({auto:false}, fiber)（本文件只关心 provider 行为，故为最小桩）
     inject(services, cb) {
-      cb({ settings: { installSection() {} } })
+      cb({
+        effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {} },
+        settings: { configure() { return () => {} } },
+      })
       return ctx
     },
     web: { registerSearchProvider(provider) { providers.push(provider); return () => {} } },
@@ -242,8 +248,17 @@ test('generic: 无 api 字段的非 AnySearch 端点仍按 generic 走（向后�
 // 6. 默认值与可用性
 // ---------------------------------------------------------------------------
 
+/** 0.1.7 起 volatile 字段解析出来是 {get()} 活引用，逐字段解引用后断言。 */
+function configDefaults() {
+  const out = {}
+  for (const [key, value] of Object.entries(Config())) {
+    out[key] = value !== null && typeof value === 'object' && typeof value.get === 'function' ? value.get() : value
+  }
+  return out
+}
+
 test('defaults: 出厂默认指向 AnySearch，profile=auto，maxResults=10', () => {
-  const defaults = Config()
+  const defaults = configDefaults()
   assert.equal(defaults.api, 'auto')
   assert.equal(defaults.url, ANYSEARCH_URL)
   assert.equal(defaults.maxResults, 10)

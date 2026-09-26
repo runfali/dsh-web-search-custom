@@ -117,9 +117,9 @@ required. The plugin's own `cordis.patch.yml` therefore also sets
 
 | Item | Value |
 |---|---|
-| DeepSeek Harness | `>=0.1.2-alpha.3 <0.2.0 || >=0.1.5-alpha.1 <0.1.6` (verified on 0.1.2-alpha.4, 0.1.5-rc.1 and 0.1.5-rc.2) |
+| DeepSeek Harness | `>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8` (verified on 0.1.2-alpha.4, 0.1.5-rc.1, 0.1.5-rc.2 and 0.1.7-rc.1) |
 | Node.js | `^22.19.0 || >=24.0.0` |
-| Runtime dependencies | **none** — the three peers come from the dsh host install |
+| Runtime dependencies | **none** — the peers come from the dsh host install |
 | Network | outbound access from the dsh host to the endpoint you configure (AnySearch resolves to its mainland-China gateway) |
 | AnySearch API key | **optional** — the anonymous tier works without one |
 
@@ -128,8 +128,22 @@ The `dsh` range is declared under `dsh.engines.dsh` (and mirrored in
 load-bearing rather than cosmetic: npm semver only satisfies a prerelease from a
 range group that itself contains a prerelease with the same
 `[major, minor, patch]` tuple, so a plain `<0.2.0` group does **not** cover
-`0.1.5-rc.1`. `tests/entry.test.mjs` pins this with a decision table and a
-counter-proof against the old single range.
+`0.1.5-rc.1` or `0.1.7-rc.1`. DSH itself checks the same peers at install and
+startup preflight with `includePrerelease: true`; that gate is more permissive,
+which is precisely why the pnpm-strict side needs its own counter-proof.
+`tests/entry.test.mjs` pins this with a decision table, a counter-proof against
+the old single range, and `tests/host-integration.test.mjs` runs the host's real
+`evaluatePluginCompatibility` and real `semver` against it.
+
+> [!IMPORTANT]
+> **dsh 0.1.7 moved the settings model.** The plugin was adapted for
+> `0.1.7-rc.1`: `settings.installSection()` is gone (an exported `Config` schema
+> *is* the namespace now, and its fields must be `.volatile()` to be editable
+> live), the browser-side `settingsScope` service was replaced by
+> `configForms`, and the card moved from the removed `settings.plugin.item` slot
+> to `plugins.item` on the Plugins page. The card renders through the shared
+> official form primitives, so it looks and behaves like the built-in provider
+> cards. Details: [docs/DSH-0.1.7-ADAPTATION.md](docs/DSH-0.1.7-ADAPTATION.md).
 
 ## Install
 
@@ -142,8 +156,8 @@ directory path instead of the package name.
 
 ## Configure in the settings page
 
-Open **Settings → Plugins** in the web UI and expand the
-"Custom search (web-search-custom)" card:
+Open **Settings → Plugins** in the web UI and click into the
+"Custom search (web-search-custom)" row — its page shows the form:
 
 - the API profile (`auto` / `anysearch` / `generic`),
 - the search URL (AnySearch by default),
@@ -153,9 +167,11 @@ Open **Settings → Plugins** in the web UI and expand the
 - the result field mapping (`resultsPath` / `urlField` / `titleField` /
   `snippetField` / `publishedField`; generic profile only).
 
-Saving writes the `web-search-custom:` section of your dsh settings document and
-takes effect immediately — the next search uses the new value, no restart. The
-overridden/reset badges behave exactly like first-party plugin cards.
+Saving writes the `web-search-custom:` entry of your profile patch document
+(`$DSH_HOME/profiles/web/cordis.patch.yml`) and takes effect immediately — the
+next search uses the new value, no restart. The form, its overridden/reset badges
+and its read-only notice are the same shared components the first-party provider
+cards use.
 
 If an older release pinned a different URL there, clear that field (Reset → Save)
 so the shipped AnySearch default applies again.
@@ -268,17 +284,22 @@ Restart dsh and the stock search provider takes over again.
 ## Development
 
 ```bash
-npm install          # dev dependencies (dsh packages, for the host-contract test)
-npm test             # node --test tests/*.test.mjs && node tests/client-smoke.mjs
-npm run test:host    # real Cordis + WebRuntime + file settings provider
+pnpm install         # dev dependencies (@deepseek-ai/dsh + dsh-settings 0.1.7-rc.1,
+                     # schemastery 3.18.4 — the host-contract test loads the real packages)
+pnpm test            # node --test tests/*.test.mjs && node tests/client-smoke.mjs
+pnpm run test:host   # host-contract subset, on its own
 ```
+
+`pnpm` is required for the dev install: the `dsh` devDependency pulls native
+subprocess helpers whose build scripts must be explicitly declined (see
+`allowBuilds` in `pnpm-workspace.yaml`) — nothing here needs a native build.
 
 | Test | What it proves |
 |---|---|
-| `tests/entry.test.mjs` | Real entry load (`import('../src/index.js')`), manifest declarations, the engines decision table (hand-rolled comparator + counter-proof + cross-check against the host's real `semver.satisfies`), four-way key parity (host schema ↔ client fields ↔ client views ↔ patch config), settings hot-reload alive reference, dependency hygiene |
+| `tests/entry.test.mjs` | Real entry load (`import('../src/index.js')`), manifest declarations, the 0.1.7 settings-namespace source (`Config` exported, every field `.volatile()`, `{get()}` live references, `configure({ auto: false })`), the engines decision table (hand-rolled comparator + counter-proof + cross-check against the host's real `semver.satisfies`), four-way key parity (host schema ↔ client fields ↔ client views ↔ patch config), locale key parity, static guards against the removed client APIs, dependency hygiene |
 | `tests/anysearch.test.mjs` | AnySearch profile: auto-detection, keyless vs Bearer headers, `max_results` arithmetic, vendor envelope mapping, the error envelope (`message` + `request_id` + 402 credential redaction), and generic-profile non-regression |
-| `tests/host-integration.test.mjs` | Driven by the real `@deepseek-ai/cordis` context, the real `ctx.web` runtime and the real file-backed settings provider: provider registration, full `web.search()` path, `maxResults` capping by the seam, live settings → next-call effect, and the seam's selection semantics |
-| `tests/client-smoke.mjs` | Browser half: bundle id, short service names, locale parity, slot registration contract, card rendering, save/reset write path, read-only disabling |
+| `tests/host-integration.test.mjs` | Driven by the real host packages: real Cordis + WebRuntime + the real `@deepseek-ai/cosmokit` volatile protocol (a `_commitVolatile`-style update is visible to the next search), the real `dsh-settings` schema helpers (`volatileForm` / `isVolatilePath` / `projectForm` / `plainConfig`), real source-level assertions on the client bundles this card depends on, and the host's real `evaluatePluginCompatibility` + `semver` against the declared ranges |
+| `tests/client-smoke.mjs` | Browser half: bundle id, short service names, locale parity, `configForms.whileServed` gating, the `plugins.item` registration contract (id/order/label thunk), both views (`summary` one-liner vs `page` form), save/reset write path, invalid-input blocking, read-only disabling and the read-only write refusal |
 | `tests/live-search.mjs` | Opt-in live check against a real endpoint: `DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' node tests/live-search.mjs` (add `DSH_WSC_LIVE_BAD_KEY=1` to also assert the invalid-key error path) |
 
 ### Live checks (opt-in, they hit the network)
@@ -292,12 +313,13 @@ DSH_WSC_LIVE_URL='https://api.anysearch.com/v1/search' DSH_WSC_LIVE_BAD_KEY=1 no
 DSH_WSC_LIVE_PARITY=1 node tests/live-settings-parity.mjs
 ```
 
-The default `npm test` suite stays offline-runnable; these scripts print `SKIP` unless the
+The default `pnpm test` suite stays offline-runnable; these scripts print `SKIP` unless the
 environment variable above is set.
 
 ```text
 src/index.js          host half — settings namespace, profile dispatch, result mapping
-lib/client.js         browser half — settings card (hand-written bundle, no build step)
+lib/client.js         browser half — settings card (hand-written bundle, no build step;
+                      renders through the shared official form primitives)
 cordis.patch.yml      bundle patch: select provider "custom" and mount the plugin
 tests/                entry + anysearch + host-contract + client-smoke + opt-in live check
 ```

@@ -202,3 +202,86 @@ extraction is unavailable from the shell. The client card change is covered by
 `tests/client-smoke.mjs` (bundle load, 15 field rows rendered, locale parity, save/reset write path),
 the strongest check available without a session.
 
+
+
+---
+
+# Round 7 — dsh 0.1.7-rc.1 contract evidence (v0.3.0, 2026-09-26)
+
+> 本轮**不是**隔离实例 E2E —— 那一步必须先重启用户正在使用的 dsh 实例（重启红线，待批准）。
+> 这里记录的是**源码级 + 真宿主对象级**证据，逐条给出坐标，可原样复跑。
+
+## Environment
+
+| Item | Value |
+|---|---|
+| dsh host (installed) | @deepseek-ai/dsh **0.1.7-rc.1** (`%APPDATA%\npm\node_modules\@deepseek-ai\dsh`) |
+| Node.js | v24.21.0 |
+| pnpm | 12.6.0 |
+| Dev dependencies | `@deepseek-ai/dsh` + `@deepseek-ai/dsh-settings` **0.1.7-rc.1**, `@deepseek-ai/schemastery` **3.18.4** |
+| Plugin under test | dsh-web-search-custom **0.3.0** |
+| Registry | `registry.npmjs.org` 直连 200；代理 `http://127.0.0.1:10808` 亦 200（出口 38.246.231.53） |
+
+## 1. Host-source contract checks (grep-level, on the installed tree)
+
+命令均以 `<dsh>/node_modules/@deepseek-ai` 为根（`<dsh>` = 上面的安装目录）。
+
+| 检查 | 命令（要点） | 结果 |
+|---|---|---|
+| `installSection` 是否还存在 | `rg installSection <dsh>/node_modules/@deepseek-ai` | **0 命中** → 已移除 |
+| `settingsScope` 是否还存在 | `rg settingsScope ...` | **0 命中** → 已移除 |
+| `settings.plugin.item` 槽位 | `rg "settings\.plugin\.item" ...` | **0 命中** → 已移除 |
+| 新槽位 `plugins.item` | `rg "plugins\.item" ...` | 5 个官方设置卡 + plugin-manager 在用 |
+| `plugins.item` 双视图 | `dsh-client-ui-plugin-manager/lib/client.js:1662,1718,1726` | `renderSlot("plugins.item", { view: "summary" \| "page" }, { only: item.id })` |
+| `slots.inject` 回调形态 | `dsh-client-ui-renderer/lib/client.js:1343-1398` | `ctx.effect(callback, ...)`；文档明确「Callback effects are synchronous disposers; iterable effects install transactionally」 |
+| `configForms` 服务 | `dsh-client-ui-settings/lib/client.js:1309`（`get`）/ `:1330`（`whileServed`） | `whileServed(namespaces, register)` 按 describe 视图的 ns 列表门控 |
+| 命名空间枚举判据 | `dsh-settings/lib/index.js:413-420` + `lib/types/schema.js:43` | `volatileForm(schema(entry.fiber.runtime.Config))` 为 undefined 即被过滤 |
+| 热编辑字段判据 | `dsh-settings/lib/index.js:505-507` | 写路径逐字段 `isVolatilePath(schema, path)`，非 volatile 直接抛 |
+| volatile 协议 | `cosmokit/lib/index.js:102-118` | `createVolatile(value) → { get(), [write](v) }`；`isVolatile` 判 `Symbol.for("cosmokit.volatile.write")` |
+| 写回目标 | `dsh-config-editor/lib/index.js:24`（`documentPath`） | profile 补丁文档（`cordis.patch.yml`），非 settings.yaml |
+| 兼容闸 | `dsh-app-boot/lib/index.js:286-313` | `semver.satisfies(runtimeVersion, range, { includePrerelease: true })` |
+| provider 缝 | `dsh-web/lib/index.js:67` | `registerSearchProvider` 未变（零漂移） |
+
+## 2. Real-host-object test evidence
+
+`pnpm run test:host`（也含在 `pnpm test`），全部走**真实宿主包**：
+
+```
+ok 1 - host-contract: 真实 dsh 依赖可解析（否则显式 skip，不假绿）
+ok 2 - host-contract: 真实 Cordis + WebRuntime 下 apply 全链路
+ok 3 - host-contract: 真实 volatile 提交后 search 立刻读到新值（活引用，非 apply 快照）
+ok 4 - host-contract: 真实选择语义——唯一可用 / 未注册 / 不可用
+ok 5 - host-contract: 真实 volatileForm —— describe() 必须枚举到本命名空间
+ok 6 - host-contract: projectForm + plainConfig 还原设置卡看到的字段值（真实 volatile 协议）
+ok 7 - host-contract: dsh.client.inject 里的每个包名都真实存在且是 web client 包
+ok 8 - host-contract: 真实 primitives 导出本卡调用的组件名
+ok 9 - host-contract: renderer 的 plugins.item 槽位与 inject 回调契约（源码级）
+ok 10 - host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界版本与旧区间
+# tests 10 / # pass 10 / # fail 0
+```
+
+关键读数（用例 10）：
+
+```
+evaluatePluginCompatibility(pkg, {}, '0.1.7-rc.1')                       → undefined（通过）
+evaluatePluginCompatibility(pkg, {}, '0.2.0')                            → 拒绝
+evaluatePluginCompatibility(<旧单区间>, {}, '0.1.7-rc.1')                → undefined（preflight 放行，includePrerelease）
+semver.satisfies('0.1.7-rc.1', '>=0.1.2-alpha.3 <0.2.0')                 → false（pnpm 严格侧拒绝）
+semver.satisfies('0.1.7-rc.1', <本仓区间>)                                → true
+```
+
+## 3. Test baseline (dsh 0.1.7-rc.1 dev dependencies)
+
+```
+pnpm test  →  node --test tests/*.test.mjs   # tests 53 / pass 53 / fail 0 / skipped 0
+              node tests/client-smoke.mjs    # 24 项全部通过
+```
+
+## 4. Honest gaps
+
+- **未做隔离实例 E2E**：`dsh plugin add` + 重启这套流程本轮没跑（重启需用户批准）。
+  步骤已写死在 [DSH-0.1.7-ADAPTATION.md](DSH-0.1.7-ADAPTATION.md) 第 5 节，含三条活体核验
+  （`pluginInventory/list` / `__DSH_BOOT__.entries` / combo URL 的字节特征）与「设置页无重复自动页」的判据。
+- 卡片在真机插件页的**视觉**呈现未验证（与上一轮同样的限制，无浏览器自动化）。
+- devDeps 升级后传递依赖带进 `@deepseek-ai/libreoffice-kit-win32-x64`（~71 MB，dev-only）——
+  发布物不受影响（`files` 白名单 + 零 dependencies + 零安装脚本）。

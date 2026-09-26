@@ -296,3 +296,107 @@ P1-1 已修并配判定表 + 反证 + 宿主 semver 交叉验证；P2/P3 项已�
 ## 五、处置
 
 无 P0/P1。P2-1（测试入库）建议交付前补齐；P3 项顺手修。修复后按停止线规则开新一轮复核。
+
+
+---
+
+# 第 7 轮：dsh 0.1.7-rc.1 适配轮（2026-09-26）
+
+> 触发：用户要求「为 dsh-web-search-custom 做新版 dsh 适配，可参考 dsh-prompt-injector」。
+> 宿主实测版本：**0.1.7-rc.1**（`C:\Users\Doctor\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh`）。
+> 上一轮基线 0.1.5-rc.1。交付版本 **0.3.0**。
+
+完整契约比对与改动清单见 [DSH-0.1.7-ADAPTATION.md](DSH-0.1.7-ADAPTATION.md)，本节只记审计口径的结论。
+
+## 0. 先证改动面（而不是先改代码）
+
+逐条读宿主真实源码后，改动面结论是**有真实代码改动**（与上一轮 prompt-injector「代码零改动」相反）：
+0.1.7 换掉了整套设置模型，本插件 host 接线与 client 设置卡两半都踩在破坏面上，
+而搜索 provider 逻辑（`ctx.web.registerSearchProvider` / provider 形状 / 结果映射）零漂移。
+
+## 1. 发现并修复的缺陷
+
+### 🔴 P1-1 settings 模型重做：host 半接线整体失效（新版引入）
+
+- **事实**：`dsh-settings/lib/index.js` 与 `lib/types/schema.js` 实测 —— `installSection` 在整个
+  0.1.7 依赖树内 **0 命中**；`describe()` 的入口过滤条件是
+  `volatileForm(schema(entry.fiber.runtime.Config))`。未导出 `Config` = 宿主看不到该命名空间。
+- **影响**：命名空间不可见 → client 半 `whileServed` 永不注册 → **插件页没有配置入口，且宿主零报错**（静默失效）。
+- **修复**：`Config` 保持导出并 15 字段全 `.volatile()`；删除 `installSection` 接线；加
+  `settings.configure({ auto: false }, ctx.fiber)` 关闭宿主自动生成的页面。
+- **守护**：`entry.test.mjs` 断言 `Config` 每字段 `meta.volatile === true` + 源码级防回退断言；
+  `host-integration.test.mjs` 用**真实** `volatileForm` / `isVolatilePath` 复现 `describe()` 与 `write()` 的判据。
+
+### 🔴 P1-2 client 半三处 API 消失（新版引入）
+
+- **事实**：`settingsScope` 与 `settings.plugin.item` 在 0.1.7 全树 **0 命中**；
+  `plugins.item`（插件页 list 槽位）取代之；`slots.inject(key, callback)` 的实现是
+  `ctx.effect(callback, ...)`（`dsh-client-ui-renderer/lib/client.js:1369`）——0.1.5 的 generator 形态
+  `function* () { yield register(...) }` 会被当普通回调调用，`register` 永不执行。
+- **影响**：设置卡彻底不出现（无报错、无 UI），且旧形态属**静默**失效。
+- **修复**：改 `configForms.get(NS)` + `configForms.whileServed([NS], ...)` 门控 +
+  `plugins.item` 注册（`id: NS` / `order: 50` / `label` thunk）+ 箭头回调返回 disposer。
+- **守护**：`entry.test.mjs` 静态断言旧 API 一个都不许复活（按调用形状判，先剥注释）；
+  `client-smoke.mjs` 桩里 `slots.inject` **当场断言 callback 返回 disposer**（generator 立刻炸）；
+  `host-integration.test.mjs` 对 renderer / plugin-manager 的真实 client bundle 做源码级断言。
+
+### 🟠 P2-1 兼容断言：旧区间在新版 host 上的判定会被说反（新版引入）
+
+- **事实**：`evaluatePluginCompatibility` 用 `semver.satisfies(..., { includePrerelease: true })`
+  （`dsh-app-boot/lib/index.js:300`）——**在这道闸下，旧单区间 `>=0.1.2-alpha.3 <0.2.0`
+  在 0.1.7-rc.1 下也会通过**；真正拦住它的是 pnpm 的严格 semver。
+- **影响**：只按一种判定写断言/文档，会把「是否已适配」说反。
+- **修复**：两种判定分别断言——preflight 通过 + 严格 semver 拒绝，并保留 `0.1.8 / 0.2.0` 越界反证。
+- **守护**：`host-integration.test.mjs` 调**真实** `evaluatePluginCompatibility` 与宿主真实 `semver`；
+  `entry.test.mjs` 的 15 行判定表与真实 `semver` 逐行交叉验证。
+
+### 🟠 P2-2 `schemastery` 区间过宽（新版引入）
+
+- **事实**：`.volatile()` 是 3.18.4 新增 API —— 本地 3.18.2 的 `lib/` 里 `volatile` **0 命中**，
+  3.18.4 源码里存在（宿主与官方插件都声明 `~3.18.4`）。
+- **影响**：旧 peer `^3.18.2` 允许 3.18.2/3.18.3 装进来，`Config` 顶层求值即
+  `TypeError: ...volatile is not a function` → 插件整包 park。
+- **修复**：peer 收紧 `~3.18.4`，devDeps 真升级到 3.18.4；`entry.test.mjs` 断言区间排掉 3.18.2。
+
+### 🟡 P3-1 只读部署下客户端仍发起写入（**存量缺陷**，非新版引入）
+
+- **事实**：官方 `SettingsFormModel.save()` 有 `writable` 守卫，本仓手写表单漏了。
+- **影响**：只读部署里一次点击 → 一次注定被拒的写；卡片不崩，但行为与官方不一致。
+- **修复**：`CardForm.save()` 加同款守卫；`client-smoke.mjs` 断言「只读 + 草稿 → save() 不写 scope」。
+
+### 🟡 P3-2 测试桩失真（**存量**）
+
+- **事实**：client-smoke 的 scope 桩 `unset` 只删 resolved 值、不还原 base 层，与真实
+  `unset = 移除用户层覆盖、回落 composition 层` 语义不符；另一处按渲染顺序盲取「重置」按钮属隐式耦合。
+- **修复**：桩改为正确回落 base；按钮通过 `label.htmlFor → 字段名` 归属（真实结构），不再依赖顺序。
+
+## 2. 测试基线（本轮，全绿）
+
+```
+pnpm test  →  node --test tests/*.test.mjs     # 53 tests / 53 pass / 0 fail（含 10 个真宿主对象用例）
+              node tests/client-smoke.mjs      # 24 项全部通过
+```
+
+新增/重写的守护（均已跑反证）：
+
+| 用例 | 反证方式 |
+|---|---|
+| `Config` 全字段 `.volatile()` | 去掉任一 `.volatile()` → 断言变红 |
+| 旧 API 静态防回退 | 把 `whileServed` 改回直接 `slots.inject` → 变红 |
+| `slots.inject` 返回 disposer | 桩里把 callback 换成 generator → 当场炸 |
+| volatile 活引用 | provider 改回读 apply 快照 → 真实 `updateVolatile` 后断言变红 |
+| 命名空间可枚举 | `Config` 不导出 → `volatileForm` 返回 undefined → 变红 |
+| 兼容闸 | peer 改回单区间 → 越界反证与严格 semver 断言变红 |
+
+## 3. 隔离实例真机 E2E
+
+**本轮未做**：它必须先重启用户正在使用的 dsh 实例（0.1.5 那轮用独立 `DSH_HOME` + 独立端口
+的做法仍适用，流程写在 DSH-0.1.7-ADAPTATION.md 第 5 节）。按重启红线纪律不自行越过——待用户点头后执行。
+
+## 4. 诚实缺口
+
+- 真机两态（`describe()`/`mutate()` 全链路、卡片在插件页的真实渲染）**未验证**；已证的是
+  「真实 schema 助手判据 + 真实 volatile 协议 + 真实 client bundle 源码 + 真实兼容闸」四层。
+- 未做浏览器自动化（与上一轮同样的限制）。
+- `pnpm install` 会带进 71 MB 的 `@deepseek-ai/libreoffice-kit-win32-x64`（`dsh` devDep 的传递
+  依赖，dev-only，不进发布物）；发布物仍零 `dependencies`、零安装脚本。
