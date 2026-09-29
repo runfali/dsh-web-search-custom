@@ -288,6 +288,9 @@ const PEER_SETTINGS = pkg.peerDependencies['@deepseek-ai/dsh-settings']
 const OLD_RANGE = '>=0.1.2-alpha.3 <0.2.0'
 
 // 判定表（左：版本；右：是否被声明区间覆盖）
+// 此表建模**严格模式**（pnpm 安装期，默认选项）——预发布只被区间内含同元组预发布者覆盖，
+// 所以上界自身的预发布（0.1.8-rc.1 / 0.1.9-alpha.1）在此列为 false。
+// 注意宿主闸用的是 includePrerelease:true，那一列会放行它们；差异见 host-integration.test.mjs。
 const DECISION_TABLE = [
   ['0.1.2-alpha.3', true],
   ['0.1.2-rc.1', true],
@@ -300,10 +303,16 @@ const DECISION_TABLE = [
   ['0.1.7-alpha.0', true],
   ['0.1.7-rc.1', true],
   ['0.1.7', true],
+  // 0.2.0 适配轮（2026-09-29）：宿主实测 0.2.0-rc.1，新区间必须放行 0.2.x 全系。
+  // 上一轮这里断言 0.2.0 === false（当时未验证，故意拦住），本轮已验证 → 有意翻转。
+  ['0.2.0-alpha.0', true],
+  ['0.2.0-rc.1', true],
+  ['0.2.0', true],
+  ['0.2.3', true],
   ['0.1.8-rc.1', false],
   ['0.1.8', false],
   ['0.1.9-alpha.1', false],
-  ['0.2.0', false],
+  ['0.3.0', false],
 ]
 
 test('engines: 判定表逐行命中 dsh.engines.dsh 与 peerDependencies 区间', () => {
@@ -315,6 +324,12 @@ test('engines: 判定表逐行命中 dsh.engines.dsh 与 peerDependencies 区间
   }
   // 声称适配的宿主版本必须真的被覆盖
   assert.equal(satisfies('0.1.7-rc.1', DECLARED), true, 'declared adaptation target must be covered by its own range')
+  assert.equal(satisfies('0.2.0-rc.1', DECLARED), true, 'the 0.2.0-rc.1 adaptation target must be covered by its own range')
+  // 兼容闸（dsh-app-boot 的 evaluatePluginCompatibility）**只**遍历 peerDependencies 里
+  // @deepseek-ai/dsh* 的条目，**从不读 dsh.engines.dsh**（全树 grep 零消费者）。
+  // 两者必须逐字一致：peer 决定生死，engines 只影响 pnpm 安装期。
+  assert.equal(PEER_DSH, DECLARED, 'peer @deepseek-ai/dsh 必须与 dsh.engines.dsh 逐字一致（闸只认 peer）')
+  assert.equal(PEER_SETTINGS, DECLARED, 'peer @deepseek-ai/dsh-settings 必须与 dsh.engines.dsh 逐字一致')
 })
 
 test('engines: 反证——旧区间覆盖不了 0.1.7-rc.1（这正是两轮修复的缺陷）', () => {
@@ -322,6 +337,14 @@ test('engines: 反证——旧区间覆盖不了 0.1.7-rc.1（这正是两轮修
   assert.equal(satisfies('0.1.5-rc.1', OLD_RANGE), false)
   assert.equal(satisfies('0.1.2-rc.1', OLD_RANGE), true)
   assert.notEqual(DECLARED, OLD_RANGE)
+})
+
+test('engines: 反证——旧三段区间覆盖不了 0.2.0-rc.1（故新段非冗余声明）', () => {
+  // 真机证据：未加新段时宿主启动闸打印 `skipping profile bundle "dsh-web-search-custom"`，
+  // 整个 bundle 不加载。
+  const OLD_THREE_CLAUSE = '>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8'
+  assert.equal(satisfies('0.2.0-rc.1', OLD_THREE_CLAUSE), false)
+  assert.equal(satisfies('0.2.0-rc.1', DECLARED), true)
 })
 
 /** 宿主自带 semver：从插件 devDep 副本解析 @deepseek-ai/dsh，再以它为根 require。 */

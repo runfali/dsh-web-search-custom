@@ -346,14 +346,18 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
   assert.ok(boot !== undefined, 'dsh-app-boot must be loadable')
   const { evaluatePluginCompatibility } = boot
 
-  // 本仓 peer 区间必须在 0.1.7-rc.1（含预发布，includePrerelease）下通过
-  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.1.7-rc.1'), undefined,
+  // 本仓 peer 区间必须在 0.2.0-rc.1（含预发布，includePrerelease）下通过
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.0-rc.1'), undefined,
     'manifest peers must accept the runtime this plugin is adapted to')
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.0'), undefined, 'also accepts the 0.2.0 release')
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.1.7-rc.1'), undefined, 'still accepts 0.1.7-rc.1')
   assert.equal(evaluatePluginCompatibility(pkg, {}, '0.1.5-rc.1'), undefined, 'still accepts 0.1.5-rc.1')
 
   // 反证：越界版本必须被拒（证明这道闸真的在判，而不是永远放行）
-  const rejected = evaluatePluginCompatibility(pkg, {}, '0.2.0')
-  assert.notEqual(rejected, undefined, '0.2.0 must be rejected')
+  // 0.2.0 适配轮（2026-09-29）：原先这里断言 0.2.0 被拒——那是「未验证就先拦住」的临时状态，
+  // 本轮已真机验证 → 有意翻转。越界反证改用真正未验证的 0.3.0。
+  const rejected = evaluatePluginCompatibility(pkg, {}, '0.3.0')
+  assert.notEqual(rejected, undefined, '0.3.0 must be rejected (unverified upper bound)')
   assert.ok(Object.keys(rejected.peers).includes('@deepseek-ai/dsh'))
 
   // 语义澄清（实测，勿误读）：这道 preflight 用 includePrerelease:true，所以旧的
@@ -362,6 +366,10 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
   const legacy = { ...pkg, peerDependencies: { ...pkg.peerDependencies, '@deepseek-ai/dsh': '>=0.1.2-alpha.3 <0.2.0' } }
   assert.equal(evaluatePluginCompatibility(legacy, {}, '0.1.7-rc.1'), undefined,
     'preflight uses includePrerelease:true, so the legacy range passes THIS gate too')
+  // 同一澄清在 0.2.0 线上同样成立：旧单区间在 preflight 下也放行 0.2.0-rc.1
+  // （因为 includePrerelease 绕过了预发布可见性规则），但严格模式在 0.2.0 正式版上会拒。
+  assert.equal(evaluatePluginCompatibility(legacy, {}, '0.2.0-rc.1'), undefined,
+    'preflight also passes the legacy range at 0.2.0-rc.1')
 
   const semver = loadHostSemver()
   if (semver === undefined) {
@@ -374,4 +382,8 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
   assert.equal(semver.satisfies('0.1.7-rc.1', DECLARED), true, 'the declared range covers the adapted runtime')
   assert.equal(semver.satisfies('0.1.7-rc.1', '>=0.1.2-alpha.3 <0.2.0', { includePrerelease: true }), true,
     'with includePrerelease the same legacy range passes — that is the preflight behaviour')
+  // 0.2.0 线：两种模式都要覆盖
+  assert.equal(semver.satisfies('0.2.0-rc.1', DECLARED), true, 'the declared range covers 0.2.0-rc.1 (strict)')
+  assert.equal(semver.satisfies('0.2.0', DECLARED), true, 'the declared range covers the 0.2.0 release (strict)')
+  assert.equal(semver.satisfies('0.3.0', DECLARED), false, 'the declared range still rejects 0.3.0')
 })
