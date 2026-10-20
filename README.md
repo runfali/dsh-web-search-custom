@@ -117,7 +117,7 @@ required. The plugin's own `cordis.patch.yml` therefore also sets
 
 | Item | Value |
 |---|---|
-| DeepSeek Harness | `>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8 || >=0.2.0-alpha.0 <0.3.0` (verified on 0.1.2-alpha.4, 0.1.5-rc.1, 0.1.5-rc.2 and 0.1.7-rc.1) |
+| DeepSeek Harness | `>=0.1.2-alpha.3 <0.1.8 \|\| >=0.1.5-alpha.1 <0.1.6 \|\| >=0.1.7-alpha.0 <0.1.8 \|\| >=0.2.0-alpha.0 <0.3.0 \|\| >=0.2.1-alpha.0 <0.3.0` (verified on 0.1.2-alpha.4, 0.1.5-rc.1, 0.1.5-rc.2, 0.1.7-rc.1, 0.2.0-rc.1 and 0.2.1-rc.2) |
 | Node.js | `^22.19.0 || >=24.0.0` |
 | Runtime dependencies | **none** — the peers come from the dsh host install |
 | Network | outbound access from the dsh host to the endpoint you configure (AnySearch resolves to its mainland-China gateway) |
@@ -323,6 +323,29 @@ lib/client.js         browser half — settings card (hand-written bundle, no bu
 cordis.patch.yml      bundle patch: select provider "custom" and mount the plugin
 tests/                entry + anysearch + host-contract + client-smoke + opt-in live check
 ```
+
+## dsh 0.2.1-rc.2 适配结论
+
+对桌面端 `D:\DeepSeek Harness\`（`FileVersion 0.2.1-rc.2`）做了 asar 解包源码比对 + **宿主真闸实跑**：
+
+- **契约点零漂移**：`dsh-web` 的 `registerSearchProvider` 与选择语义、`dsh-settings` 的
+  `configure()`/`volatileForm`、client 的 `configForms.whileServed` 与 `slots.inject`
+  在 0.2.1 全部保持原形状（官方 `dsh-client-ui-settings-web-search` 仍
+  `require("@deepseek-ai/dsh-client-ui-primitives")`）。**`src/` 与 `lib/client.js` 未改一行。**
+- **本轮补的是 pnpm 安装期，不是加载闸**：旧四段区间在真闸下
+  `evaluatePluginCompatibility(pkg, {}, '0.2.1-rc.2') → undefined`（PASS），即本来就能加载；
+  被拒的是**严格模式**。真负例 `>=0.1.7-alpha.0 <0.1.8` 被判 REJECT，证明闸确实在判。
+- **`WebRuntime.Config` 的两个字段是 `.volatile()`**：`searchProvider.get()` —— 直接传裸值会
+  `TypeError`。测试夹具已改为经 `cosmo.createVolatile()` 包成活引用（这是夹具漂移，不是插件缺陷）。
+- **`evaluatePluginCompatibility` 返回体改名**：`peers` → `requirements`（0.2.0 时是 `peers`）；
+  测试对两种形状都取。
+- **闸语义在 0.2.1 变了**：顶层 `engines.dsh` 存在时它独自判定、peers 被忽略；本仓区间写在嵌套的
+  `dsh.engines.dsh`，故实际仍由 peers 判定（真闸实测确认）。
+- **版本号保持本仓自己的 0.3.0**（不跟宿主发布号，见 `v0.2.0-rc.1` 那轮的说明）。
+- 验证：`node --test tests/*.test.mjs` **55 pass / 0 fail / 0 skipped** + client-smoke 24 项；
+  原先那条「primitives 不可解析 → SKIP」的静默跳过已消除（把 `dsh-client-ui-primitives@0.2.1-rc.2`
+  显式装成 devDep）。
+
 
 ## dsh 0.2.0-rc.1 适配结论
 

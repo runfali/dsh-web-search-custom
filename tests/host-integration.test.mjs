@@ -112,7 +112,16 @@ async function makeHost(webConfig) {
     loadDep('@deepseek-ai/cosmokit'),
   ])
   const app = new Context()
-  const web = new WebRuntime(app, webConfig ?? {})
+  // 0.2.1 起 WebRuntime.Config 的 searchProvider / fetchProvider 是 .volatile()：
+  // 宿主交给 service 的是 {get()} 活引用，WebRuntime.search() 直接 .get() 读它。
+  // 传裸值会让 search 在 config.searchProvider.get() 处 TypeError（夹具漂移，不是插件缺陷）。
+  const resolved = {}
+  // 字段集合取自宿主自己的 schema（不写死键名），每条都包成活引用——
+  // resolveConfig 在真宿主里就是把 schema 默认值解析成 volatile 引用的那一步。
+  for (const key of Object.keys(WebRuntime.Config.dict ?? { searchProvider: 0, fetchProvider: 0 })) {
+    resolved[key] = cosmo.createVolatile(webConfig?.[key])
+  }
+  const web = new WebRuntime(app, resolved)
   const ctx = app.extend({ web })
   return {
     ctx, web, cosmo,
@@ -346,19 +355,24 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
   assert.ok(boot !== undefined, 'dsh-app-boot must be loadable')
   const { evaluatePluginCompatibility } = boot
 
-  // 本仓 peer 区间必须在 0.2.0-rc.1（含预发布，includePrerelease）下通过
-  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.0-rc.1'), undefined,
+  // 本仓 peer 区间必须在 0.2.1-rc.2（含预发布，includePrerelease）下通过
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.1-rc.2'), undefined,
     'manifest peers must accept the runtime this plugin is adapted to')
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.1'), undefined, 'also accepts the 0.2.1 release')
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.0-rc.1'), undefined,
+    'still accepts the previous adaptation target')
   assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.0'), undefined, 'also accepts the 0.2.0 release')
   assert.equal(evaluatePluginCompatibility(pkg, {}, '0.1.7-rc.1'), undefined, 'still accepts 0.1.7-rc.1')
   assert.equal(evaluatePluginCompatibility(pkg, {}, '0.1.5-rc.1'), undefined, 'still accepts 0.1.5-rc.1')
 
   // 反证：越界版本必须被拒（证明这道闸真的在判，而不是永远放行）
-  // 0.2.0 适配轮（2026-09-29）：原先这里断言 0.2.0 被拒——那是「未验证就先拦住」的临时状态，
-  // 本轮已真机验证 → 有意翻转。越界反证改用真正未验证的 0.3.0。
+  // 0.2.1 适配轮（2026-10-20）：返回体的字段是 `requirements`（0.2.0 时叫 `peers`），
+  // 故断言走 requirements；为兼容两种形状取其一。
   const rejected = evaluatePluginCompatibility(pkg, {}, '0.3.0')
   assert.notEqual(rejected, undefined, '0.3.0 must be rejected (unverified upper bound)')
-  assert.ok(Object.keys(rejected.peers).includes('@deepseek-ai/dsh'))
+  const unmet = rejected.requirements ?? rejected.peers
+  assert.ok(Object.keys(unmet).includes('@deepseek-ai/dsh'),
+    'the rejection must name the @deepseek-ai/dsh peer requirement: ' + JSON.stringify(rejected))
 
   // 语义澄清（实测，勿误读）：这道 preflight 用 includePrerelease:true，所以旧的
   // 单区间 '>=0.1.2-alpha.3 <0.2.0' 在 0.1.7-rc.1 下**也会通过**——真正拦住它的是
@@ -366,10 +380,17 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
   const legacy = { ...pkg, peerDependencies: { ...pkg.peerDependencies, '@deepseek-ai/dsh': '>=0.1.2-alpha.3 <0.2.0' } }
   assert.equal(evaluatePluginCompatibility(legacy, {}, '0.1.7-rc.1'), undefined,
     'preflight uses includePrerelease:true, so the legacy range passes THIS gate too')
-  // 同一澄清在 0.2.0 线上同样成立：旧单区间在 preflight 下也放行 0.2.0-rc.1
-  // （因为 includePrerelease 绕过了预发布可见性规则），但严格模式在 0.2.0 正式版上会拒。
-  assert.equal(evaluatePluginCompatibility(legacy, {}, '0.2.0-rc.1'), undefined,
-    'preflight also passes the legacy range at 0.2.0-rc.1')
+  // 同一澄清在 0.2.1 线上同样成立：旧四段区间在 preflight 下也放行 0.2.1-rc.2
+  // （上界自身预发布被 includePrerelease 绕过），但严格模式会拒——这正是本轮补 0.2.1 段的原因。
+  const oldFour = {
+    ...pkg,
+    peerDependencies: {
+      ...pkg.peerDependencies,
+      '@deepseek-ai/dsh': '>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8 || >=0.2.0-alpha.0 <0.3.0',
+    },
+  }
+  assert.equal(evaluatePluginCompatibility(oldFour, {}, '0.2.1-rc.2'), undefined,
+    'the preflight passes the old four-clause range at 0.2.1-rc.2 — the 0.2.1 clause fixes pnpm strict mode, not loading')
 
   const semver = loadHostSemver()
   if (semver === undefined) {
@@ -382,8 +403,12 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
   assert.equal(semver.satisfies('0.1.7-rc.1', DECLARED), true, 'the declared range covers the adapted runtime')
   assert.equal(semver.satisfies('0.1.7-rc.1', '>=0.1.2-alpha.3 <0.2.0', { includePrerelease: true }), true,
     'with includePrerelease the same legacy range passes — that is the preflight behaviour')
-  // 0.2.0 线：两种模式都要覆盖
+  // 0.2.x 线：两种模式都要覆盖
   assert.equal(semver.satisfies('0.2.0-rc.1', DECLARED), true, 'the declared range covers 0.2.0-rc.1 (strict)')
   assert.equal(semver.satisfies('0.2.0', DECLARED), true, 'the declared range covers the 0.2.0 release (strict)')
+  assert.equal(semver.satisfies('0.2.1-rc.2', DECLARED), true,
+    'the declared range covers 0.2.1-rc.2 in STRICT mode (this is what the 0.2.1 clause buys)')
+  assert.equal(semver.satisfies('0.2.1-rc.2', oldFour.peerDependencies['@deepseek-ai/dsh']), false,
+    'strict semver rejects the old four-clause range at 0.2.1-rc.2 → the 0.2.1 clause is not redundant')
   assert.equal(semver.satisfies('0.3.0', DECLARED), false, 'the declared range still rejects 0.3.0')
 })

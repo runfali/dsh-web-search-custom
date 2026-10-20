@@ -242,8 +242,12 @@ function compare(a, b) {
   return comparePrerelease(a.pre, b.pre)
 }
 
-/** npm semver 预发布规则的最小实现：只支持 '>=X.Y.Z[-pre] <A.B.C[-pre]' 的 '||' 组合。 */
-function satisfies(version, range) {
+/**
+ * npm semver 的最小实现：只支持 '>=X.Y.Z[-pre] <A.B.C[-pre]' 的 '||' 组合。
+ * hostMode=true 复刻宿主闸的 `includePrerelease: true` —— 预发布可见性规则被绕过，
+ * 退化成纯比较器（`<0.3.0` 因此会放行 `0.3.0-alpha.0`）。
+ */
+function satisfies(version, range, hostMode) {
   const v = parseVersion(version)
   if (v === undefined) return false
   return String(range).split('||').some((clause) => {
@@ -262,8 +266,8 @@ function satisfies(version, range) {
       if (bound.op === '>=' && order < 0) return false
       if (bound.op === '<' && order >= 0) return false
     }
-    // 预发布版本只被「区间内含同一 [major,minor,patch] 元组的预发布」满足
-    if (v.pre.length > 0) {
+    // 严格模式：预发布版本只被「区间内含同一 [major,minor,patch] 元组的预发布」满足
+    if (!hostMode && v.pre.length > 0) {
       const anchored = bounds.some((bound) =>
         bound.version.major === v.major &&
         bound.version.minor === v.minor &&
@@ -274,6 +278,7 @@ function satisfies(version, range) {
     return true
   })
 }
+const satisfiesHost = (version, range) => satisfies(version, range, true)
 
 /** 把 '~X.Y.Z' 展开成 '>=X.Y.Z <X.(Y+1).0'（只支持本仓库用到的一种写法）。 */
 function expandTilde(range) {
@@ -287,47 +292,60 @@ const PEER_DSH = pkg.peerDependencies['@deepseek-ai/dsh']
 const PEER_SETTINGS = pkg.peerDependencies['@deepseek-ai/dsh-settings']
 const OLD_RANGE = '>=0.1.2-alpha.3 <0.2.0'
 
-// 判定表（左：版本；右：是否被声明区间覆盖）
-// 此表建模**严格模式**（pnpm 安装期，默认选项）——预发布只被区间内含同元组预发布者覆盖，
-// 所以上界自身的预发布（0.1.8-rc.1 / 0.1.9-alpha.1）在此列为 false。
-// 注意宿主闸用的是 includePrerelease:true，那一列会放行它们；差异见 host-integration.test.mjs。
+// 判定表：三列 [版本, 严格模式（pnpm 安装期）, 宿主闸（includePrerelease，决定能否加载）]。
+// 严格模式：预发布只被区间内含同元组预发布者覆盖，故上界自身的预发布在此列多为 false；
+// 宿主闸绕过该规则，故那些行是**分叉行**——写下来让两套判定的差异可见。
 const DECISION_TABLE = [
-  ['0.1.2-alpha.3', true],
-  ['0.1.2-rc.1', true],
-  ['0.1.3', true],
-  ['0.1.4', true],
-  ['0.1.5-alpha.1', true],
-  ['0.1.5-rc.1', true],
-  ['0.1.5', true],
-  ['0.1.6', true],
-  ['0.1.7-alpha.0', true],
-  ['0.1.7-rc.1', true],
-  ['0.1.7', true],
+  ['0.1.2-alpha.3', true, true],
+  ['0.1.2-rc.1', true, true],
+  ['0.1.3', true, true],
+  ['0.1.4', true, true],
+  ['0.1.5-alpha.1', true, true],
+  ['0.1.5-rc.1', true, true],
+  ['0.1.5', true, true],
+  ['0.1.6', true, true],
+  ['0.1.7-alpha.0', true, true],
+  ['0.1.7-rc.1', true, true],
+  ['0.1.7', true, true],
   // 0.2.0 适配轮（2026-09-29）：宿主实测 0.2.0-rc.1，新区间必须放行 0.2.x 全系。
   // 上一轮这里断言 0.2.0 === false（当时未验证，故意拦住），本轮已验证 → 有意翻转。
-  ['0.2.0-alpha.0', true],
-  ['0.2.0-rc.1', true],
-  ['0.2.0', true],
-  ['0.2.3', true],
-  ['0.1.8-rc.1', false],
-  ['0.1.8', false],
-  ['0.1.9-alpha.1', false],
-  ['0.3.0', false],
+  ['0.2.0-alpha.0', true, true],
+  ['0.2.0-rc.1', true, true],
+  ['0.2.0', true, true],
+  // 0.2.1 适配轮（2026-10-20）：宿主实测 0.2.1-rc.2。这三行在旧四段区间下 strict=false
+  // 而 host=true（分叉行），补 0.2.1 段后转为两列一致 —— 修的是 pnpm 安装期，不是加载闸。
+  ['0.2.1-alpha.0', true, true],
+  ['0.2.1-rc.1', true, true],
+  ['0.2.1-rc.2', true, true],
+  ['0.2.1', true, true],
+  ['0.2.3', true, true],
+  // 分叉行：上界自身的预发布
+  ['0.1.8-rc.1', false, true],
+  ['0.2.2-rc.1', false, true],
+  ['0.3.0-alpha.0', false, true],
+  // 真正被排除的
+  ['0.1.8', false, false],
+  ['0.1.9-alpha.1', false, false],
+  ['0.3.0', false, false],
 ]
 
-test('engines: 判定表逐行命中 dsh.engines.dsh 与 peerDependencies 区间', () => {
-  for (const [version, expected] of DECISION_TABLE) {
-    const why = 'dsh.engines.dsh must ' + (expected ? 'cover ' : 'exclude ') + version
-    assert.equal(satisfies(version, DECLARED), expected, why)
-    assert.equal(satisfies(version, PEER_DSH), expected, 'peer @deepseek-ai/dsh: ' + why)
-    assert.equal(satisfies(version, PEER_SETTINGS), expected, 'peer @deepseek-ai/dsh-settings: ' + why)
+test('engines: 判定表逐行命中 dsh.engines.dsh 与 peerDependencies 区间（双模式）', () => {
+  for (const [version, strict, host] of DECISION_TABLE) {
+    const why = 'dsh.engines.dsh must ' + (strict ? 'cover ' : 'exclude ') + version
+    assert.equal(satisfies(version, DECLARED), strict, why)
+    assert.equal(satisfiesHost(version, DECLARED), host, 'host-gate column: ' + why)
+    assert.equal(satisfies(version, PEER_DSH), strict, 'peer @deepseek-ai/dsh: ' + why)
+    assert.equal(satisfiesHost(version, PEER_DSH), host, 'peer @deepseek-ai/dsh (host gate): ' + why)
+    assert.equal(satisfies(version, PEER_SETTINGS), strict, 'peer @deepseek-ai/dsh-settings: ' + why)
+    assert.equal(satisfiesHost(version, PEER_SETTINGS), host, 'peer @deepseek-ai/dsh-settings (host gate): ' + why)
   }
   // 声称适配的宿主版本必须真的被覆盖
   assert.equal(satisfies('0.1.7-rc.1', DECLARED), true, 'declared adaptation target must be covered by its own range')
   assert.equal(satisfies('0.2.0-rc.1', DECLARED), true, 'the 0.2.0-rc.1 adaptation target must be covered by its own range')
-  // 兼容闸（dsh-app-boot 的 evaluatePluginCompatibility）**只**遍历 peerDependencies 里
-  // @deepseek-ai/dsh* 的条目，**从不读 dsh.engines.dsh**（全树 grep 零消费者）。
-  // 两者必须逐字一致：peer 决定生死，engines 只影响 pnpm 安装期。
+  assert.equal(satisfies('0.2.1-rc.2', DECLARED), true, 'the 0.2.1-rc.2 adaptation target must be covered (strict mode)')
+  // 兼容闸（dsh-app-boot 的 evaluatePluginCompatibility）：0.2.1 起顶层 engines.dsh 存在时
+  // 它独自判定、peers 被忽略；本仓区间写在**嵌套的** dsh.engines.dsh（不是顶层 engines），
+  // 故实际仍由 peers 判定（宿主真闸实测确认）。两者必须逐字一致。
   assert.equal(PEER_DSH, DECLARED, 'peer @deepseek-ai/dsh 必须与 dsh.engines.dsh 逐字一致（闸只认 peer）')
   assert.equal(PEER_SETTINGS, DECLARED, 'peer @deepseek-ai/dsh-settings 必须与 dsh.engines.dsh 逐字一致')
 })
@@ -345,6 +363,17 @@ test('engines: 反证——旧三段区间覆盖不了 0.2.0-rc.1（故新段非
   const OLD_THREE_CLAUSE = '>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8'
   assert.equal(satisfies('0.2.0-rc.1', OLD_THREE_CLAUSE), false)
   assert.equal(satisfies('0.2.0-rc.1', DECLARED), true)
+})
+
+test('engines: 反证——旧四段区间在严格模式下覆盖不了 0.2.1-rc.2（故 0.2.1 段非冗余）', () => {
+  // 与 0.2.0 那轮的关键差异（本轮 2026-10-20 订正，别照抄上一轮的说法）：
+  //   0.2.0-rc.1 在旧区间下**宿主闸也拒**（区间里根本没 0.2.x 段）；
+  //   0.2.1-rc.2 在旧区间下**宿主闸照样放行**（上界自身预发布被 includePrerelease 绕过）。
+  // 故 0.2.1 段修的是 pnpm 安装期严格模式，不是加载闸。
+  const OLD_FOUR_CLAUSE = '>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8 || >=0.2.0-alpha.0 <0.3.0'
+  assert.equal(satisfies('0.2.1-rc.2', OLD_FOUR_CLAUSE), false, 'strict mode rejects 0.2.1-rc.2 on the old four-clause range')
+  assert.equal(satisfiesHost('0.2.1-rc.2', OLD_FOUR_CLAUSE), true, 'the host gate already passes it — this round is not a loading rejection')
+  assert.equal(satisfies('0.2.1-rc.2', DECLARED), true, 'the new clause must cover 0.2.1-rc.2 in strict mode')
 })
 
 /** 宿主自带 semver：从插件 devDep 副本解析 @deepseek-ai/dsh，再以它为根 require。 */
@@ -365,11 +394,15 @@ test('engines: 与宿主真实 semver.satisfies 逐行交叉验证', () => {
     return
   }
   let crossChecked = 0
-  for (const [version, expected] of DECISION_TABLE) {
-    assert.equal(semver.satisfies(version, DECLARED), expected, 'host semver disagrees for ' + version)
-    assert.equal(semver.satisfies(version, PEER_DSH), expected, 'host semver disagrees for peer dsh at ' + version)
-    assert.equal(semver.satisfies(version, PEER_SETTINGS), expected, 'host semver disagrees for peer dsh-settings at ' + version)
+  for (const [version, strict, host] of DECISION_TABLE) {
+    assert.equal(semver.satisfies(version, DECLARED), strict, 'host semver (strict) disagrees for ' + version)
+    assert.equal(semver.satisfies(version, DECLARED, { includePrerelease: true }), host,
+      'host semver (host gate) disagrees for ' + version)
+    assert.equal(semver.satisfies(version, PEER_DSH), strict, 'host semver (strict) disagrees for peer dsh at ' + version)
+    assert.equal(semver.satisfies(version, PEER_SETTINGS), strict, 'host semver (strict) disagrees for peer dsh-settings at ' + version)
     assert.equal(semver.satisfies(version, OLD_RANGE), satisfies(version, OLD_RANGE), 'comparator drift at ' + version)
+    assert.equal(semver.satisfies(version, OLD_RANGE, { includePrerelease: true }), satisfiesHost(version, OLD_RANGE),
+      'host-gate comparator drift at ' + version)
     crossChecked += 1
   }
   assert.ok(crossChecked > 0)
