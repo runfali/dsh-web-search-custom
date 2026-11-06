@@ -324,66 +324,81 @@ cordis.patch.yml      bundle patch: select provider "custom" and mount the plugi
 tests/                entry + anysearch + host-contract + client-smoke + opt-in live check
 ```
 
-## dsh 0.2.2-rc.1 适配结论
+## dsh 0.2.2-rc.1 adaptation notes
 
-对桌面端 `D:\DeepSeek Harness\`（`resources/app.asar/dsh/package.json` = `0.2.2-rc.1`）做了 asar 解包源码比对 + **宿主真闸实跑**：
+Verified against the desktop install at `D:\DeepSeek Harness\`
+(`resources/app.asar/dsh/package.json` = `0.2.2-rc.1`) by unpacking the asar source and
+running the host's own gate function against the real manifest.
 
-- **契约点零漂移**：`dsh-web` 的 `registerSearchProvider`（`lib/index.js:69`）与选择语义、
-  `WebRuntime.Config` 两个字段的 `.volatile()`、`dsh-settings` 的
-  `configure(presentation, owner)`（`:370`）、client 的 `slots.inject` / `configForms.whileServed` /
-  `locale.register` 全部保持原形状。**`src/` 与 `lib/client.js` 未改一行。**
-- **本轮补的仍是 pnpm 安装期，不是加载闸**：旧五段区间在真闸下
-  `evaluatePluginCompatibility(pkg, {}, '0.2.2-rc.1') → undefined`（PASS），被拒的是严格模式；
-  真负例 `0.3.0` 判 REJECT 且返回体点名两条 peer，证明闸确实在判。
-- **schemastery 必须改析取**：0.2.2 宿主自带 `3.19.0`，而 `dsh-settings@0.2.2-rc.1` 的 peer 正是
-  `~3.19.0`；原区间 `~3.18.4` 会让 pnpm 装一份 3.18.4 当夹具。现为 `~3.18.4 || ~3.19.0`，
-  且 devDeps 显式 pin `3.19.0`。
-- **版本号保持本仓自己的 0.3.0**（不跟宿主发布号，同前两轮决策）。
-- 验证：`node --test tests/*.test.mjs` **56 pass / 0 fail / 0 skipped**（基线 55 + 新增 1 条反证）
-  + client-smoke 24 项；`pnpm peers check` 干净。详见 [docs/DSH-0.2.2-ADAPTATION.md](docs/DSH-0.2.2-ADAPTATION.md)。
+- **No contract drift**: `dsh-web`'s `registerSearchProvider` (`lib/index.js:69`) and its
+  selection semantics, the `.volatile()` fields of `WebRuntime.Config` (`:48-51`),
+  dsh-settings' `configure(presentation, owner)` (`:370`), and the client-side
+  `slots.inject` / `configForms.whileServed` / `locale.register` all keep their shape.
+  **`src/` and `lib/client.js` were not touched.**
+- **This round again fixes pnpm install-time strictness, not the loading gate**: the old
+  five-clause range already returns `undefined` (PASS) from
+  `evaluatePluginCompatibility(pkg, {}, '0.2.2-rc.1')`; strict mode is what rejects it.
+  The real negative `0.3.0` is REJECTed and the result names both peers, which proves the
+  gate really judges instead of always passing.
+- **schemastery had to become a disjunction**: the 0.2.2 host ships `3.19.0` and
+  `dsh-settings@0.2.2-rc.1` requires `~3.19.0`, while the old `~3.18.4` range made pnpm
+  install a 3.18.4 copy as the test fixture. The peer is now `~3.18.4 || ~3.19.0`, with
+  `3.19.0` pinned explicitly in devDependencies.
+- **The version stays at this repo's own 0.3.0** — it does not track the host release
+  number (same decision as the 0.2.0 and 0.2.1 rounds).
+- Verification: `node --test tests/*.test.mjs` **56 pass / 0 fail / 0 skipped** (baseline 55
+  plus one new counter-proof) and 24 client-smoke checks; `pnpm peers check` is clean.
+  Details: [docs/DSH-0.2.2-ADAPTATION.md](docs/DSH-0.2.2-ADAPTATION.md).
 
+## dsh 0.2.1-rc.2 adaptation notes
 
+Verified against the desktop install at `D:\DeepSeek Harness\` (`FileVersion 0.2.1-rc.2`)
+by unpacking the asar source and running the host's own gate function.
 
-## dsh 0.2.1-rc.2 适配结论
+- **No contract drift**: `dsh-web`'s `registerSearchProvider` and its selection semantics,
+  dsh-settings' `configure()`/`volatileForm`, and the client-side
+  `configForms.whileServed` / `slots.inject` all keep their shape in 0.2.1 (the official
+  `dsh-client-ui-settings-web-search` still requires
+  `@deepseek-ai/dsh-client-ui-primitives`). **`src/` and `lib/client.js` were not touched.**
+- **That round fixed pnpm install-time strictness, not the loading gate**: the old
+  four-clause range already returned `undefined` (PASS) from
+  `evaluatePluginCompatibility(pkg, {}, '0.2.1-rc.2')`, so the plugin could already load;
+  strict mode was the side that rejected it. A real negative
+  (`>=0.1.7-alpha.0 <0.1.8`) is REJECTed, proving the gate really judges.
+- **`WebRuntime.Config`'s two fields are `.volatile()`**: reading `searchProvider.get()`
+  on a raw value throws `TypeError`. The test harness now wraps them through
+  `cosmo.createVolatile()` (fixture drift, not a plugin defect).
+- **`evaluatePluginCompatibility` renamed its result field**: `peers` → `requirements`
+  (it was `peers` in 0.2.0); the assertions accept either shape.
+- **The gate's semantics changed in 0.2.1**: a top-level `engines.dsh` decides alone and
+  the peers are ignored. This repo declares the **nested** `dsh.engines.dsh`, so peers
+  still decide (confirmed by running the real gate).
+- **The version stays at this repo's own 0.3.0** (see the `v0.2.0-rc.1` round for the
+  rationale).
+- Verification: `node --test tests/*.test.mjs` **55 pass / 0 fail / 0 skipped** plus 24
+  client-smoke checks; the former silent skip ("primitives unresolvable → SKIP") is gone
+  because `dsh-client-ui-primitives@0.2.1-rc.2` is an explicit devDependency.
 
-对桌面端 `D:\DeepSeek Harness\`（`FileVersion 0.2.1-rc.2`）做了 asar 解包源码比对 + **宿主真闸实跑**：
+## dsh 0.2.0-rc.1 adaptation notes
 
-- **契约点零漂移**：`dsh-web` 的 `registerSearchProvider` 与选择语义、`dsh-settings` 的
-  `configure()`/`volatileForm`、client 的 `configForms.whileServed` 与 `slots.inject`
-  在 0.2.1 全部保持原形状（官方 `dsh-client-ui-settings-web-search` 仍
-  `require("@deepseek-ai/dsh-client-ui-primitives")`）。**`src/` 与 `lib/client.js` 未改一行。**
-- **本轮补的是 pnpm 安装期，不是加载闸**：旧四段区间在真闸下
-  `evaluatePluginCompatibility(pkg, {}, '0.2.1-rc.2') → undefined`（PASS），即本来就能加载；
-  被拒的是**严格模式**。真负例 `>=0.1.7-alpha.0 <0.1.8` 被判 REJECT，证明闸确实在判。
-- **`WebRuntime.Config` 的两个字段是 `.volatile()`**：`searchProvider.get()` —— 直接传裸值会
-  `TypeError`。测试夹具已改为经 `cosmo.createVolatile()` 包成活引用（这是夹具漂移，不是插件缺陷）。
-- **`evaluatePluginCompatibility` 返回体改名**：`peers` → `requirements`（0.2.0 时是 `peers`）；
-  测试对两种形状都取。
-- **闸语义在 0.2.1 变了**：顶层 `engines.dsh` 存在时它独自判定、peers 被忽略；本仓区间写在嵌套的
-  `dsh.engines.dsh`，故实际仍由 peers 判定（真闸实测确认）。
-- **版本号保持本仓自己的 0.3.0**（不跟宿主发布号，见 `v0.2.0-rc.1` 那轮的说明）。
-- 验证：`node --test tests/*.test.mjs` **55 pass / 0 fail / 0 skipped** + client-smoke 24 项；
-  原先那条「primitives 不可解析 → SKIP」的静默跳过已消除（把 `dsh-client-ui-primitives@0.2.1-rc.2`
-  显式装成 devDep）。
+Verified against the desktop install at `D:\DeepSeek Harness\` (`FileVersion 0.2.0-rc.1`)
+by unpacking the asar source and running the real gate against it. Key points:
 
-
-## dsh 0.2.0-rc.1 适配结论
-
-对桌面端 `D:\DeepSeek Harness\`（`FileVersion 0.2.0-rc.1`）做了 asar 解包源码比对 +
-**真机闸实测**。要点：
-
-- **唯一必改项是兼容区间**：原区间在 0.2.0-rc.1 下被启动闸拒绝
-  （`dsh: skipping profile bundle ...`），插件**整个 bundle 不加载**（web 与 desktop 同时失效）。
-  追加 `|| >=0.2.0-alpha.0 <0.3.0` 后放行。
-- **闸只读 `peerDependencies`**：判定函数（`dsh-app-boot` 的
-  `evaluatePluginCompatibility`）只遍历 `peerDependencies` 里 `@deepseek-ai/dsh*` 的条目，
-  **从不读 `dsh.engines.dsh`**（全树 grep 零消费者）。两者必须逐字一致，测试已守护。
-- **两种 semver 模式**：宿主闸用 `includePrerelease: true`，此时「预发布可见性」规则被绕过，
-  于是**上界自身的预发布也被放行**（`<0.1.8` 放行 `0.1.8-rc.1`、`<0.3.0` 放行 `0.3.0-alpha.0`）；
-  严格模式（pnpm 安装期）会拒绝它们。所以上界拦的是**正式版**，不是预发布。
-  若要连预发布一起拒，上界须写成 `<0.3.0-0`。
-- **凭证细节**：详细取证、改动清单、测试结果与诚实缺口见 `docs/DSH-0.2.0-ADAPTATION.md`。
-
+- **The only mandatory change was the compatibility range**: the old range was rejected by
+  the startup gate under 0.2.0-rc.1 (`dsh: skipping profile bundle ...`), so the whole
+  bundle never loaded (both web and desktop stopped working). Adding
+  `|| >=0.2.0-alpha.0 <0.3.0` let it through.
+- **The gate reads only `peerDependencies`**: the check (`evaluatePluginCompatibility` in
+  `dsh-app-boot`) walks only `@deepseek-ai/dsh*` entries under `peerDependencies` and
+  **never reads `dsh.engines.dsh`** (zero consumers across the tree). The two must be
+  character-for-character identical, and the tests guard that.
+- **Two semver modes**: the host gate uses `includePrerelease: true`, which bypasses the
+  prerelease-visibility rule, so prereleases of the upper bound itself are let through
+  (`<0.1.8` admits `0.1.8-rc.1`, `<0.3.0` admits `0.3.0-alpha.0`); strict mode (pnpm at
+  install time) rejects them. The upper bound therefore blocks **releases**, not
+  prereleases — to reject those too, write it as `<0.3.0-0`.
+- **Evidence and details**: the full source comparison, change list, test results and the
+  honest gaps are in [docs/DSH-0.2.0-ADAPTATION.md](docs/DSH-0.2.0-ADAPTATION.md).
 
 ## License
 
