@@ -355,9 +355,12 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
   assert.ok(boot !== undefined, 'dsh-app-boot must be loadable')
   const { evaluatePluginCompatibility } = boot
 
-  // 本仓 peer 区间必须在 0.2.1-rc.2（含预发布，includePrerelease）下通过
-  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.1-rc.2'), undefined,
+  // 本仓 peer 区间必须在 0.2.2-rc.1（含预发布，includePrerelease）下通过
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.2-rc.1'), undefined,
     'manifest peers must accept the runtime this plugin is adapted to')
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.2'), undefined, 'also accepts the 0.2.2 release')
+  assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.1-rc.2'), undefined,
+    'still accepts the previous adaptation target')
   assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.1'), undefined, 'also accepts the 0.2.1 release')
   assert.equal(evaluatePluginCompatibility(pkg, {}, '0.2.0-rc.1'), undefined,
     'still accepts the previous adaptation target')
@@ -391,6 +394,16 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
   }
   assert.equal(evaluatePluginCompatibility(oldFour, {}, '0.2.1-rc.2'), undefined,
     'the preflight passes the old four-clause range at 0.2.1-rc.2 — the 0.2.1 clause fixes pnpm strict mode, not loading')
+  // 同一澄清在 0.2.2 线上照旧：旧五段区间在 preflight 下也放行 0.2.2-rc.1，严格模式才拒。
+  const oldFive = {
+    ...pkg,
+    peerDependencies: {
+      ...pkg.peerDependencies,
+      '@deepseek-ai/dsh': '>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8 || >=0.2.0-alpha.0 <0.3.0 || >=0.2.1-alpha.0 <0.3.0',
+    },
+  }
+  assert.equal(evaluatePluginCompatibility(oldFive, {}, '0.2.2-rc.1'), undefined,
+    'the preflight passes the old five-clause range at 0.2.2-rc.1 — the 0.2.2 clause fixes pnpm strict mode, not loading')
 
   const semver = loadHostSemver()
   if (semver === undefined) {
@@ -410,5 +423,10 @@ test('host-contract: 真实兼容闸接受本仓 peer 区间，并拒绝越界�
     'the declared range covers 0.2.1-rc.2 in STRICT mode (this is what the 0.2.1 clause buys)')
   assert.equal(semver.satisfies('0.2.1-rc.2', oldFour.peerDependencies['@deepseek-ai/dsh']), false,
     'strict semver rejects the old four-clause range at 0.2.1-rc.2 → the 0.2.1 clause is not redundant')
+  // 0.2.2 线：严格模式必须覆盖本轮的适配目标
+  assert.equal(semver.satisfies('0.2.2-rc.1', DECLARED), true,
+    'the declared range covers 0.2.2-rc.1 in STRICT mode (this is what the 0.2.2 clause buys)')
+  assert.equal(semver.satisfies('0.2.2-rc.1', oldFive.peerDependencies['@deepseek-ai/dsh']), false,
+    'strict semver rejects the old five-clause range at 0.2.2-rc.1 → the 0.2.2 clause is not redundant')
   assert.equal(semver.satisfies('0.3.0', DECLARED), false, 'the declared range still rejects 0.3.0')
 })

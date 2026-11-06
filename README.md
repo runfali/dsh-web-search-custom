@@ -117,7 +117,7 @@ required. The plugin's own `cordis.patch.yml` therefore also sets
 
 | Item | Value |
 |---|---|
-| DeepSeek Harness | `>=0.1.2-alpha.3 <0.1.8 \|\| >=0.1.5-alpha.1 <0.1.6 \|\| >=0.1.7-alpha.0 <0.1.8 \|\| >=0.2.0-alpha.0 <0.3.0 \|\| >=0.2.1-alpha.0 <0.3.0` (verified on 0.1.2-alpha.4, 0.1.5-rc.1, 0.1.5-rc.2, 0.1.7-rc.1, 0.2.0-rc.1 and 0.2.1-rc.2) |
+| DeepSeek Harness | `>=0.1.2-alpha.3 <0.1.8 \|\| >=0.1.5-alpha.1 <0.1.6 \|\| >=0.1.7-alpha.0 <0.1.8 \|\| >=0.2.0-alpha.0 <0.3.0 \|\| >=0.2.1-alpha.0 <0.3.0 \|\| >=0.2.2-alpha.0 <0.3.0` (verified on 0.1.2-alpha.4, 0.1.5-rc.1, 0.1.5-rc.2, 0.1.7-rc.1, 0.2.0-rc.1, 0.2.1-rc.2 and 0.2.2-rc.1) |
 | Node.js | `^22.19.0 || >=24.0.0` |
 | Runtime dependencies | **none** — the peers come from the dsh host install |
 | Network | outbound access from the dsh host to the endpoint you configure (AnySearch resolves to its mainland-China gateway) |
@@ -284,8 +284,8 @@ Restart dsh and the stock search provider takes over again.
 ## Development
 
 ```bash
-pnpm install         # dev dependencies (@deepseek-ai/dsh + dsh-settings 0.1.7-rc.1,
-                     # schemastery 3.18.4 — the host-contract test loads the real packages)
+pnpm install         # dev dependencies (@deepseek-ai/dsh + dsh-settings + dsh-client-ui-primitives
+                     # 0.2.2-rc.1, schemastery 3.19.0 — the host-contract test loads the real packages)
 pnpm test            # node --test tests/*.test.mjs && node tests/client-smoke.mjs
 pnpm run test:host   # host-contract subset, on its own
 ```
@@ -323,6 +323,26 @@ lib/client.js         browser half — settings card (hand-written bundle, no bu
 cordis.patch.yml      bundle patch: select provider "custom" and mount the plugin
 tests/                entry + anysearch + host-contract + client-smoke + opt-in live check
 ```
+
+## dsh 0.2.2-rc.1 适配结论
+
+对桌面端 `D:\DeepSeek Harness\`（`resources/app.asar/dsh/package.json` = `0.2.2-rc.1`）做了 asar 解包源码比对 + **宿主真闸实跑**：
+
+- **契约点零漂移**：`dsh-web` 的 `registerSearchProvider`（`lib/index.js:69`）与选择语义、
+  `WebRuntime.Config` 两个字段的 `.volatile()`、`dsh-settings` 的
+  `configure(presentation, owner)`（`:370`）、client 的 `slots.inject` / `configForms.whileServed` /
+  `locale.register` 全部保持原形状。**`src/` 与 `lib/client.js` 未改一行。**
+- **本轮补的仍是 pnpm 安装期，不是加载闸**：旧五段区间在真闸下
+  `evaluatePluginCompatibility(pkg, {}, '0.2.2-rc.1') → undefined`（PASS），被拒的是严格模式；
+  真负例 `0.3.0` 判 REJECT 且返回体点名两条 peer，证明闸确实在判。
+- **schemastery 必须改析取**：0.2.2 宿主自带 `3.19.0`，而 `dsh-settings@0.2.2-rc.1` 的 peer 正是
+  `~3.19.0`；原区间 `~3.18.4` 会让 pnpm 装一份 3.18.4 当夹具。现为 `~3.18.4 || ~3.19.0`，
+  且 devDeps 显式 pin `3.19.0`。
+- **版本号保持本仓自己的 0.3.0**（不跟宿主发布号，同前两轮决策）。
+- 验证：`node --test tests/*.test.mjs` **56 pass / 0 fail / 0 skipped**（基线 55 + 新增 1 条反证）
+  + client-smoke 24 项；`pnpm peers check` 干净。详见 [docs/DSH-0.2.2-ADAPTATION.md](docs/DSH-0.2.2-ADAPTATION.md)。
+
+
 
 ## dsh 0.2.1-rc.2 适配结论
 

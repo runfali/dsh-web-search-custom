@@ -100,7 +100,7 @@ provider 选择遵循能力缝自身的规则，且在调用时刻解析：配�
 
 | 项 | 值 |
 |---|---|
-| DeepSeek Harness | `>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8 || >=0.2.0-alpha.0 <0.3.0`（已在 0.1.2-alpha.4、0.1.5-rc.1、0.1.5-rc.2、0.1.7-rc.1 实测） |
+| DeepSeek Harness | `>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8 || >=0.2.0-alpha.0 <0.3.0 || >=0.2.1-alpha.0 <0.3.0 || >=0.2.2-alpha.0 <0.3.0`（已在 0.1.2-alpha.4、0.1.5-rc.1、0.1.5-rc.2、0.1.7-rc.1、0.2.0-rc.1、0.2.1-rc.2、0.2.2-rc.1 实测） |
 | Node.js | `^22.19.0 || >=24.0.0` |
 | 运行时依赖 | **无**——peer 全部由 dsh 宿主自带 |
 | 网络 | dsh 宿主到你所配置端点的出站访问（AnySearch 解析到其国内网关） |
@@ -250,6 +250,34 @@ dsh plugin --profile web remove dsh-web-search-custom
 - 结果映射是字段级的、不懂查询语言：generic 档遇到异常载荷形状需要调整字段映射
   （必要时还要调 `resultsPath`）。
 
+## dsh 0.2.1-rc.2 / 0.2.2-rc.1 适配结论
+
+对桌面端 `D:\DeepSeek Harness\` 做了 asar 解包源码比对 + **宿主真闸实跑**（两轮同一方法）。
+
+**0.2.1-rc.2 轮**（提交 `d8be4ac`）：
+
+- **契约点零漂移**：`dsh-web` 的 `registerSearchProvider` 与选择语义、`dsh-settings` 的
+  `configure()`/`volatileForm`、client 的 `configForms.whileServed` 与 `slots.inject` 全部保持原形状。
+- **补的是 pnpm 安装期，不是加载闸**：旧区间在真闸下本来就 PASS，被拒的是严格模式。
+- **`WebRuntime.Config` 两个字段是 `.volatile()`**：夹具必须传 `createVolatile()` 活引用，直接传裸值
+  会 `TypeError`（夹具漂移，不是插件缺陷）。
+- **`evaluatePluginCompatibility` 返回体改名**：`peers` → `requirements`。
+
+**0.2.2-rc.1 轮**（2026-11-06）：
+
+- **契约点仍未漂移**：`dsh-web/lib/index.js:69` `registerSearchProvider`、`:48-51` `.volatile()` 的
+  `Config`、`dsh-settings/lib/index.js:370` `configure(presentation, owner)`、client 的
+  `slots.inject`（`dsh-client-ui-renderer/lib/client.js:1368`）、`configForms.whileServed`（`:1315`）、
+  `locale.register`（`dsh-client-locale/lib/client.js:1675`）全部原形状。**`src/` 与 `lib/client.js` 未改。**
+- **schemastery 必须改析取**：0.2.2 宿主自带 `3.19.0`，`dsh-settings@0.2.2-rc.1` 的 peer 正是
+  `~3.19.0`；原区间 `~3.18.4` 会被 pnpm 装一份旧版当夹具。现为 `~3.18.4 || ~3.19.0` 并显式 pin
+  `3.19.0` 到 devDeps。
+- **版本号保持本仓自有 0.3.0**（不跟宿主发布号）。
+- 验证：**56 pass / 0 fail / 0 skipped** + client-smoke 24 项；真闸 `0.2.2-rc.1` PASS、
+  `0.3.0` REJECT。详见 [docs/DSH-0.2.2-ADAPTATION.md](docs/DSH-0.2.2-ADAPTATION.md)。
+
+
+
 ## dsh 0.2.0-rc.1 适配结论
 
 对桌面端 `D:\DeepSeek Harness\`（`FileVersion 0.2.0-rc.1`）做了 asar 解包源码比对 +
@@ -271,8 +299,8 @@ dsh plugin --profile web remove dsh-web-search-custom
 ## 开发与测试
 
 ```bash
-pnpm install         # 开发依赖（@deepseek-ai/dsh + dsh-settings 0.1.7-rc.1、
-                     # schemastery 3.18.4 —— 宿主契约测试加载的是真实包）
+pnpm install         # 开发依赖（@deepseek-ai/dsh + dsh-settings + dsh-client-ui-primitives
+                     # 0.2.2-rc.1，schemastery 3.19.0 —— 宿主契约测试加载的是真实包）
 pnpm test            # node --test tests/*.test.mjs && node tests/client-smoke.mjs
 pnpm run test:host   # 只跑宿主契约那一组
 ```

@@ -318,10 +318,14 @@ const DECISION_TABLE = [
   ['0.2.1-rc.1', true, true],
   ['0.2.1-rc.2', true, true],
   ['0.2.1', true, true],
+  // 0.2.2 适配轮（2026-11-06）：宿主实测 0.2.2-rc.1。这三行在旧五段区间下 strict=false
+  // 而 host=true（原来是分叉行），补 0.2.2 段后转为两列一致 —— 同样修的是 pnpm 安装期。
+  ['0.2.2-alpha.0', true, true],
+  ['0.2.2-rc.1', true, true],
+  ['0.2.2', true, true],
   ['0.2.3', true, true],
   // 分叉行：上界自身的预发布
   ['0.1.8-rc.1', false, true],
-  ['0.2.2-rc.1', false, true],
   ['0.3.0-alpha.0', false, true],
   // 真正被排除的
   ['0.1.8', false, false],
@@ -343,6 +347,7 @@ test('engines: 判定表逐行命中 dsh.engines.dsh 与 peerDependencies 区间
   assert.equal(satisfies('0.1.7-rc.1', DECLARED), true, 'declared adaptation target must be covered by its own range')
   assert.equal(satisfies('0.2.0-rc.1', DECLARED), true, 'the 0.2.0-rc.1 adaptation target must be covered by its own range')
   assert.equal(satisfies('0.2.1-rc.2', DECLARED), true, 'the 0.2.1-rc.2 adaptation target must be covered (strict mode)')
+  assert.equal(satisfies('0.2.2-rc.1', DECLARED), true, 'the 0.2.2-rc.1 adaptation target must be covered (strict mode)')
   // 兼容闸（dsh-app-boot 的 evaluatePluginCompatibility）：0.2.1 起顶层 engines.dsh 存在时
   // 它独自判定、peers 被忽略；本仓区间写在**嵌套的** dsh.engines.dsh（不是顶层 engines），
   // 故实际仍由 peers 判定（宿主真闸实测确认）。两者必须逐字一致。
@@ -374,6 +379,16 @@ test('engines: 反证——旧四段区间在严格模式下覆盖不了 0.2.1-r
   assert.equal(satisfies('0.2.1-rc.2', OLD_FOUR_CLAUSE), false, 'strict mode rejects 0.2.1-rc.2 on the old four-clause range')
   assert.equal(satisfiesHost('0.2.1-rc.2', OLD_FOUR_CLAUSE), true, 'the host gate already passes it — this round is not a loading rejection')
   assert.equal(satisfies('0.2.1-rc.2', DECLARED), true, 'the new clause must cover 0.2.1-rc.2 in strict mode')
+})
+
+test('engines: 反证——旧五段区间在严格模式下覆盖不了 0.2.2-rc.1（故 0.2.2 段非冗余）', () => {
+  // 与 0.2.0 那轮的区别同 0.2.1 轮：0.2.2-rc.1 在旧五段区间下**宿主闸照样放行**
+  // （上界 <0.3.0 自身的预发布被 includePrerelease 绕过），严格模式才拒 —— 故本段
+  // 修的是 pnpm 安装期严格 semver，不是加载闸。
+  const OLD_FIVE_CLAUSE = '>=0.1.2-alpha.3 <0.1.8 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.7-alpha.0 <0.1.8 || >=0.2.0-alpha.0 <0.3.0 || >=0.2.1-alpha.0 <0.3.0'
+  assert.equal(satisfies('0.2.2-rc.1', OLD_FIVE_CLAUSE), false, 'strict mode rejects 0.2.2-rc.1 on the old five-clause range')
+  assert.equal(satisfiesHost('0.2.2-rc.1', OLD_FIVE_CLAUSE), true, 'the host gate already passes it — this round is not a loading rejection')
+  assert.equal(satisfies('0.2.2-rc.1', DECLARED), true, 'the new clause must cover 0.2.2-rc.1 in strict mode')
 })
 
 /** 宿主自带 semver：从插件 devDep 副本解析 @deepseek-ai/dsh，再以它为根 require。 */
@@ -520,11 +535,16 @@ test('hygiene: 无安装期脚本、无运行时依赖', () => {
   assert.ok(pkg.peerDependencies['@deepseek-ai/dsh'])
   assert.ok(pkg.peerDependencies['@deepseek-ai/dsh-settings'])
   // .volatile() 是 schemastery 3.18.4 新增 API；区间必须排掉 3.18.2（3.18.2 无 .volatile，
-  // 真实加载会当场 TypeError）。'~X.Y.Z' 展开为 '>=X.Y.Z <X.(Y+1).0' 后复用同一比较器。
-  const schemasteryRange = expandTilde(pkg.peerDependencies['@deepseek-ai/schemastery'])
+  // 真实加载会当场 TypeError）。0.2.2 轮起区间是析取：0.2.1 线宿主自带 3.18.4，0.2.2 线
+  // 自带 3.19.0（dsh-settings@0.2.2-rc.1 的 peer 正是 ~3.19.0），两条都要覆盖。
+  // '~X.Y.Z' 展开为 '>=X.Y.Z <X.(Y+1).0' 后复用同一比较器（逐段展开再拼回 '||'）。
+  const schemasteryRange = String(pkg.peerDependencies['@deepseek-ai/schemastery'])
+    .split('||')
+    .map((clause) => expandTilde(clause.trim()))
+    .join(' || ')
   assert.equal(satisfies('3.18.2', schemasteryRange), false)
   assert.equal(satisfies('3.18.4', schemasteryRange), true)
-  assert.equal(satisfies('3.19.0', schemasteryRange), false)
+  assert.equal(satisfies('3.19.0', schemasteryRange), true, '0.2.2 host ships schemastery 3.19.0')
 })
 
 // ---------------------------------------------------------------------------
